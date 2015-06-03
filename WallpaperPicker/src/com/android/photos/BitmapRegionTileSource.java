@@ -19,6 +19,7 @@ package com.android.photos;
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.res.Resources;
+import android.drm.DrmHelper;
 import android.graphics.Bitmap;
 import android.graphics.Bitmap.Config;
 import android.graphics.BitmapFactory;
@@ -39,6 +40,7 @@ import com.android.gallery3d.glrenderer.BitmapTexture;
 import com.android.photos.views.TiledImageRenderer;
 
 import java.io.BufferedInputStream;
+import java.io.ByteArrayInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -264,6 +266,12 @@ public class BitmapRegionTileSource implements TiledImageRenderer.TileSource {
             mUri = uri;
         }
         private InputStream regenerateInputStream() throws FileNotFoundException {
+            String filepath = DrmHelper.getFilePath(mContext, mUri);
+            if (DrmHelper.isDrmFile(filepath)) {
+                byte[] bytes = DrmHelper.getDrmImageBytes(filepath);
+                return new ByteArrayInputStream(bytes);
+            }
+
             InputStream is = mContext.getContentResolver().openInputStream(mUri);
             return new BufferedInputStream(is);
         }

@@ -24,6 +24,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.content.res.Resources;
+import android.drm.DrmHelper;
 import android.graphics.Bitmap;
 import android.graphics.Bitmap.CompressFormat;
 import android.graphics.BitmapFactory;
@@ -540,6 +541,15 @@ public class WallpaperCropActivity extends Activity {
                         "image byte array given");
             } else {
                 try {
+                    String filepath = mInFilePath;
+                    if(mInUri != null){
+                        filepath = DrmHelper.getFilePath(mContext, mInUri);
+                    }
+                    if(DrmHelper.isDrmFile(filepath)){
+                        byte[] bytes = DrmHelper.getDrmImageBytes(filepath);
+                        return new ByteArrayInputStream(bytes);
+                    }
+
                     if (mInUri != null) {
                         return new BufferedInputStream(
                                 mContext.getContentResolver().openInputStream(mInUri));
