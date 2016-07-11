@@ -2187,7 +2187,9 @@ public class Launcher extends Activity
         }
 
         // If not handled, then just start the provided search intent
-        startActivitySafely(v, searchIntent, null);
+        if (null != searchIntent) {
+            startActivitySafely(v, searchIntent, null);
+        }
     }
 
     public boolean isOnCustomContent() {
@@ -2985,6 +2987,9 @@ public class Launcher extends Activity
 
     public boolean startActivitySafely(View v, Intent intent, Object tag) {
         boolean success = false;
+
+        if (null == intent) { return success; }
+
         if (mIsSafeModeEnabled && !Utilities.isSystemApp(this, intent)) {
             Toast.makeText(this, R.string.safemode_shortcut_error, Toast.LENGTH_SHORT).show();
             return false;
