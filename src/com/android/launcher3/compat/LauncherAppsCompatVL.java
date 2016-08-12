@@ -25,6 +25,7 @@ import android.content.pm.LauncherApps;
 import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.DeadObjectException;
 import android.os.UserHandle;
 
 import java.util.ArrayList;
@@ -48,8 +49,20 @@ public class LauncherAppsCompatVL extends LauncherAppsCompat {
 
     public List<LauncherActivityInfoCompat> getActivityList(String packageName,
             UserHandleCompat user) {
-        List<LauncherActivityInfo> list = mLauncherApps.getActivityList(packageName,
-                user.getUser());
+        List<LauncherActivityInfo> list = null;
+
+        try {
+            list = mLauncherApps.getActivityList(packageName, user.getUser());
+        } catch (Exception e) {
+            if (e.getCause() instanceof DeadObjectException) {
+                // in this case LauncherAppsService is dead/killed
+                // we may bypss this case, if remote service is dead
+                // the list will reload after the launcher load thread start again
+            } else {
+                throw e;
+            }
+        }
+
         if (list.size() == 0) {
             return Collections.emptyList();
         }
@@ -99,7 +112,21 @@ public class LauncherAppsCompatVL extends LauncherAppsCompat {
     }
 
     public boolean isPackageEnabledForProfile(String packageName, UserHandleCompat user) {
-        return mLauncherApps.isPackageEnabled(packageName, user.getUser());
+        boolean isPackageEnabled = false;
+
+        try {
+            isPackageEnabled = mLauncherApps.isPackageEnabled(packageName, user.getUser());
+        } catch (Exception e) {
+            if (e.getCause() instanceof DeadObjectException) {
+                // in this case LauncherAppsService is dead/killed
+                // we may bypss this case, if remote service is dead
+                // the default value will be false which mean package is disabled
+            } else {
+                throw e;
+            }
+        }
+
+        return isPackageEnabled;
     }
 
     public boolean isActivityEnabledForProfile(ComponentName component, UserHandleCompat user) {
