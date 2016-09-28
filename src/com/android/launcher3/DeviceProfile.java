@@ -138,11 +138,19 @@ public class DeviceProfile {
         iconDrawablePaddingOriginalPx =
                 res.getDimensionPixelSize(R.dimen.dynamic_grid_icon_drawable_padding);
 
-        // AllApps uses the original non-scaled icon text size
-        allAppsIconTextSizePx = Utilities.pxFromDp(inv.iconTextSize, dm);
+        if (res.getBoolean(R.bool.config_jio_new_feature_enabled)){
+            allAppsIconTextSizePx = Utilities.pxFromDp(res.
+                    getInteger(R.integer.config_jio_allapp_icon_text_size), dm);
 
-        // AllApps uses the original non-scaled icon size
-        allAppsIconSizePx = Utilities.pxFromDp(inv.iconSize, dm);
+            allAppsIconSizePx = Utilities.pxFromDp(res.
+                    getInteger(R.integer.config_jio_allapp_icon_size) ,dm);
+        } else {
+            // AllApps uses the original non-scaled icon text size
+            allAppsIconTextSizePx = Utilities.pxFromDp(inv.iconTextSize, dm);
+
+            // AllApps uses the original non-scaled icon size
+            allAppsIconSizePx = Utilities.pxFromDp(inv.iconSize, dm);
+        }
 
         // Determine sizes.
         widthPx = width;

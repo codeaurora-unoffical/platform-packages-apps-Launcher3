@@ -112,6 +112,12 @@
         launcher:screen="1"
         launcher:x="1"
         launcher:y="3" />
+     <favorite
+        launcher:packageName="com.cyanogenmod.filemanager"
+        launcher:className="com.cyanogenmod.filemanager.activities.NavigationActivity"
+        launcher:screen="1"
+        launcher:x="2"
+        launcher:y="2" />
     <favorite
         launcher:packageName="com.android.settings"
         launcher:className="com.android.settings.Settings"
