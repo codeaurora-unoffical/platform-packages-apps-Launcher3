@@ -97,6 +97,8 @@ public class DeviceProfile {
     private int searchBarSpaceWidthPx;
     private int searchBarSpaceHeightPx;
 
+    public boolean searchBarVisible;
+
     public DeviceProfile(Context context, InvariantDeviceProfile inv,
             Point minSize, Point maxSize,
             int width, int height, boolean isLandscape) {
@@ -111,6 +113,8 @@ public class DeviceProfile {
         isTablet = res.getBoolean(R.bool.is_tablet);
         isLargeTablet = res.getBoolean(R.bool.is_large_tablet);
         isPhone = !isTablet && !isLargeTablet;
+
+        searchBarVisible = res.getBoolean(R.bool.config_searchbar_visible_default);
 
         // Some more constants
         transposeLayoutWithOrientation =
@@ -206,8 +210,9 @@ public class DeviceProfile {
         // Search Bar
         searchBarSpaceWidthPx = Math.min(widthPx,
                 res.getDimensionPixelSize(R.dimen.dynamic_grid_search_bar_max_width));
-        searchBarSpaceHeightPx = getSearchBarTopOffset()
-                + res.getDimensionPixelSize(R.dimen.dynamic_grid_search_bar_height);
+        searchBarSpaceHeightPx = getSearchBarTopOffset() + (searchBarVisible ?
+                res.getDimensionPixelSize(R.dimen.dynamic_grid_search_bar_height)
+                : 3 * edgeMarginPx);
 
         // Calculate the actual text height
         Paint textPaint = new Paint();
@@ -249,7 +254,7 @@ public class DeviceProfile {
     /** Returns the search bar top offset */
     private int getSearchBarTopOffset() {
         if (isTablet && !isVerticalBarLayout()) {
-            return 4 * edgeMarginPx;
+            return searchBarVisible ? 4 * edgeMarginPx : 0;
         } else {
             return 2 * edgeMarginPx;
         }
