@@ -3461,6 +3461,10 @@ public class Launcher extends Activity
     }
 
     public View getOrCreateQsbBar() {
+        if (mDeviceProfile != null && !mDeviceProfile.searchBarVisible) {
+            return null;
+        }
+
         if (mLauncherCallbacks != null && mLauncherCallbacks.providesSearch()) {
             return mLauncherCallbacks.getQsbBar();
         }
