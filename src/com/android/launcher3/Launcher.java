@@ -572,9 +572,13 @@ public class Launcher extends Activity
             ComponentName componentName = new ComponentName(LAUNCHER_UNREAD_SERVICE_PACKAGENAME,
                     LAUNCHER_UNREAD_SERVICE_CLASSNAME);
             intent.setComponent(componentName);
-            final Intent eintent = new Intent(Utilities.
-                    createExplicitFromImplicitIntent(this, intent));
-            bindService(eintent, mConnection, Context.BIND_AUTO_CREATE);
+            Intent requestIntent = Utilities.
+                    createExplicitFromImplicitIntent(this, intent);
+
+            if (requestIntent != null) {
+                final Intent eintent = new Intent(requestIntent);
+                bindService(eintent, mConnection, Context.BIND_AUTO_CREATE);
+            }
         }
     }
 
