@@ -33,6 +33,7 @@ import com.android.launcher3.compat.LauncherActivityInfoCompat;
 import com.android.launcher3.compat.LauncherAppsCompat;
 import com.android.launcher3.compat.UserHandleCompat;
 import com.android.launcher3.compat.UserManagerCompat;
+import com.android.launcher3.util.PackageManagerHelper;
 import com.android.launcher3.util.Thunk;
 
 import org.json.JSONException;
@@ -146,6 +147,15 @@ public class InstallShortcutReceiver extends BroadcastReceiver {
         }
         PendingInstallShortcutInfo info = createPendingInfo(context, data);
         if (info != null) {
+            if (!info.isLauncherActivity()) {
+                // Since its a custom shortcut, verify that it is safe to launch.
+                if (!PackageManagerHelper.hasPermissionForActivity(
+                        context, info.launchIntent, null)) {
+                    // Target cannot be launched, or requires some special permission to launch
+                    Log.e(TAG, "Ignoring malicious intent " + info.launchIntent.toUri(0));
+                    return;
+                }
+            }
             queuePendingShortcutInfo(info, context);
         }
     }
@@ -318,22 +328,9 @@ public class InstallShortcutReceiver extends BroadcastReceiver {
             // This name is only used for comparisons and notifications, so fall back to activity
             // name if not supplied
             String name = ensureValidName(mContext, launchIntent, label).toString();
-            Bitmap icon = null;
-            Intent.ShortcutIconResource iconResource = null;
-
-            try {
-                // the parcel data may broken when system high consumption and limit resource
-                icon = data.getParcelableExtra(Intent.EXTRA_SHORTCUT_ICON);
-            } catch (ClassCastException e) {
-                Log.d(TAG, "Exception when get shortcut icon: " + e);
-            }
-
-            try {
-                // the parcel data may broken when system high consumption and limit resource
-                iconResource = data.getParcelableExtra(Intent.EXTRA_SHORTCUT_ICON_RESOURCE);
-            } catch (ClassCastException e) {
-                Log.d(TAG, "Exception when get shortcut icon resource: " + e);
-            }
+            Bitmap icon = data.getParcelableExtra(Intent.EXTRA_SHORTCUT_ICON);
+            Intent.ShortcutIconResource iconResource =
+                data.getParcelableExtra(Intent.EXTRA_SHORTCUT_ICON_RESOURCE);
 
             // Only encode the parameters which are supported by the API.
             try {
@@ -361,7 +358,7 @@ public class InstallShortcutReceiver extends BroadcastReceiver {
 
         public ShortcutInfo getShortcutInfo() {
             if (activityInfo != null) {
-                return ShortcutInfo.fromActivityInfo(activityInfo, mContext);
+                return new ShortcutInfo(activityInfo, mContext);
             } else {
                 return LauncherAppState.getInstance().getModel().infoFromShortcutIntent(mContext, data);
             }
