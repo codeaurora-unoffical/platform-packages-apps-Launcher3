@@ -141,6 +141,7 @@ public class NotificationFooterLayout extends FrameLayout {
         icon.setBackground(info.getIconForBackground(getContext(), mBackgroundColor));
         icon.setOnClickListener(info);
         icon.setTag(info);
+        icon.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
         mIconRow.addView(icon, 0, mIconLayoutParams);
         return icon;
     }
@@ -204,6 +205,7 @@ public class NotificationFooterLayout extends FrameLayout {
                 collapseFooter.addListener(new AnimatorListenerAdapter() {
                     @Override
                     public void onAnimationEnd(Animator animation) {
+                        ((ViewGroup) getParent()).findViewById(R.id.divider).setVisibility(GONE);
                         ((ViewGroup) getParent()).removeView(NotificationFooterLayout.this);
                     }
                 });

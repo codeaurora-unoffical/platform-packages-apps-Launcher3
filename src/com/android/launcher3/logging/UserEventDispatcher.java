@@ -21,6 +21,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.os.SystemClock;
+import android.support.annotation.Nullable;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewParent;
@@ -29,7 +30,7 @@ import com.android.launcher3.DropTarget;
 import com.android.launcher3.ItemInfo;
 import com.android.launcher3.R;
 import com.android.launcher3.Utilities;
-import com.android.launcher3.config.ProviderConfig;
+import com.android.launcher3.config.FeatureFlags;
 import com.android.launcher3.userevent.nano.LauncherLogProto.Action;
 import com.android.launcher3.userevent.nano.LauncherLogProto.ContainerType;
 import com.android.launcher3.userevent.nano.LauncherLogProto.LauncherEvent;
@@ -60,11 +61,13 @@ public class UserEventDispatcher {
 
     private static final String TAG = "UserEvent";
     private static final boolean IS_VERBOSE =
-            ProviderConfig.IS_DOGFOOD_BUILD && Utilities.isPropertyEnabled(LogConfig.USEREVENT);
+            FeatureFlags.IS_DOGFOOD_BUILD && Utilities.isPropertyEnabled(LogConfig.USEREVENT);
 
-    public static UserEventDispatcher newInstance(Context context, boolean isInMultiWindowMode) {
+    public static UserEventDispatcher newInstance(Context context, boolean isInLandscapeMode,
+            boolean isInMultiWindowMode) {
         UserEventDispatcher ued = Utilities.getOverrideObject(UserEventDispatcher.class,
                 context.getApplicationContext(), R.string.user_event_dispatcher_class);
+        ued.mIsInLandscapeMode = isInLandscapeMode;
         ued.mIsInMultiWindowMode = isInMultiWindowMode;
         return ued;
     }
@@ -88,7 +91,7 @@ public class UserEventDispatcher {
     /**
      * Recursively finds the parent of the given child which implements IconLogInfoProvider
      */
-    public static LogContainerProvider getLaunchProviderRecursive(View v) {
+    public static LogContainerProvider getLaunchProviderRecursive(@Nullable View v) {
         ViewParent parent;
         if (v != null) {
             parent = v.getParent();
@@ -112,6 +115,7 @@ public class UserEventDispatcher {
     private long mElapsedSessionMillis;
     private long mActionDurationMillis;
     private boolean mIsInMultiWindowMode;
+    private boolean mIsInLandscapeMode;
 
     // Used for filling in predictedRank on {@link Target}s.
     private List<ComponentKey> mPredictedApps;
@@ -144,7 +148,11 @@ public class UserEventDispatcher {
         return event;
     }
 
-    public boolean fillInLogContainerData(LauncherEvent event, View v) {
+    /**
+     * Fills in the container data on the given event if the given view is not null.
+     * @return whether container data was added.
+     */
+    private boolean fillInLogContainerData(LauncherEvent event, @Nullable View v) {
         // Fill in grid(x,y), pageIndex of the child and container type of the parent
         LogContainerProvider provider = getLaunchProviderRecursive(v);
         if (v == null || !(v.getTag() instanceof ItemInfo) || provider == null) {
@@ -200,9 +208,16 @@ public class UserEventDispatcher {
     }
 
     public void logActionOnControl(int action, int controlType) {
-        LauncherEvent event = newLauncherEvent(
-                newTouchAction(action), newTarget(Target.Type.CONTROL));
+        logActionOnControl(action, controlType, null);
+    }
+
+    public void logActionOnControl(int action, int controlType, @Nullable View controlInContainer) {
+        final LauncherEvent event = controlInContainer == null
+                ? newLauncherEvent(newTouchAction(action), newTarget(Target.Type.CONTROL))
+                : newLauncherEvent(newTouchAction(action), newTarget(Target.Type.CONTROL),
+                        newTarget(Target.Type.CONTAINER));
         event.srcTarget[0].controlType = controlType;
+        fillInLogContainerData(event, controlInContainer);
         dispatchUserEvent(event, null);
     }
 
@@ -296,6 +311,7 @@ public class UserEventDispatcher {
     }
 
     public void dispatchUserEvent(LauncherEvent ev, Intent intent) {
+        ev.isInLandscapeMode = mIsInLandscapeMode;
         ev.isInMultiWindowMode = mIsInMultiWindowMode;
         ev.elapsedContainerMillis = SystemClock.uptimeMillis() - mElapsedContainerMillis;
         ev.elapsedSessionMillis = SystemClock.uptimeMillis() - mElapsedSessionMillis;
@@ -315,6 +331,7 @@ public class UserEventDispatcher {
                 ev.elapsedContainerMillis,
                 ev.elapsedSessionMillis,
                 ev.actionDurationMillis);
+        log += "\n isInLandscapeMode " + ev.isInLandscapeMode;
         log += "\n isInMultiWindowMode " + ev.isInMultiWindowMode;
         Log.d(TAG, log);
     }
