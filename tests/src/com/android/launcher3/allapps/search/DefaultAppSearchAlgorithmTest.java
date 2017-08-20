@@ -19,6 +19,7 @@ import android.content.ComponentName;
 import android.test.InstrumentationTestCase;
 
 import com.android.launcher3.AppInfo;
+import com.android.launcher3.Utilities;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -71,6 +72,29 @@ public class DefaultAppSearchAlgorithmTest extends InstrumentationTestCase {
         // match lower case words
         assertTrue(mAlgorithm.matches(getInfo("elephant"), "e"));
 
+        assertTrue(mAlgorithm.matches(getInfo("电子邮件"), "电"));
+        assertTrue(mAlgorithm.matches(getInfo("电子邮件"), "电子"));
+        assertFalse(mAlgorithm.matches(getInfo("电子邮件"), "子"));
+        assertFalse(mAlgorithm.matches(getInfo("电子邮件"), "邮件"));
+
+        assertFalse(mAlgorithm.matches(getInfo("Bot"), "ba"));
+        assertFalse(mAlgorithm.matches(getInfo("bot"), "ba"));
+    }
+
+    public void testMatchesVN() {
+        if (!Utilities.ATLEAST_NOUGAT) {
+            return;
+        }
+        assertTrue(mAlgorithm.matches(getInfo("다운로드"), "다"));
+        assertTrue(mAlgorithm.matches(getInfo("드라이브"), "드"));
+        assertTrue(mAlgorithm.matches(getInfo("다운로드 드라이브"), "ㄷ"));
+        assertTrue(mAlgorithm.matches(getInfo("운로 드라이브"), "ㄷ"));
+        assertTrue(mAlgorithm.matches(getInfo("abc"), "åbç"));
+        assertTrue(mAlgorithm.matches(getInfo("Alpha"), "ål"));
+
+        assertFalse(mAlgorithm.matches(getInfo("다운로드 드라이브"), "ㄷㄷ"));
+        assertFalse(mAlgorithm.matches(getInfo("로드라이브"), "ㄷ"));
+        assertFalse(mAlgorithm.matches(getInfo("abc"), "åç"));
     }
 
     private AppInfo getInfo(String title) {
