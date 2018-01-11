@@ -33,6 +33,7 @@ import android.util.Property;
 import android.util.SparseArray;
 
 import com.android.launcher3.graphics.IconPalette;
+import com.android.launcher3.Utilities;
 
 public class FastBitmapDrawable extends Drawable {
 
@@ -53,7 +54,15 @@ public class FastBitmapDrawable extends Drawable {
             }
         }
     };
-    public static final int CLICK_FEEDBACK_DURATION = 2000;
+    public static final int CLICK_FEEDBACK_DURATION;
+
+    static {
+        if (Utilities.getSystemProperty("ro.config.low_ram","").equals("true")) {
+            CLICK_FEEDBACK_DURATION = 200;
+        } else {
+            CLICK_FEEDBACK_DURATION = 2000;
+        }
+    }
 
     // Since we don't need 256^2 values for combinations of both the brightness and saturation, we
     // reduce the value space to a smaller value V, which reduces the number of cached
