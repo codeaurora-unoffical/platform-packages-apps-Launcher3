@@ -346,8 +346,17 @@ public class DeviceProfile {
     private void updateIconSize(float scale, Resources res, DisplayMetrics dm) {
         // Workspace
         float invIconSizePx = isVerticalBarLayout() ? inv.landscapeIconSize : inv.iconSize;
-        iconSizePx = (int) (Utilities.pxFromDp(invIconSizePx, dm) * scale);
-        iconTextSizePx = (int) (Utilities.pxFromSp(inv.iconTextSize, dm) * scale);
+
+        if (res.getBoolean(R.bool.config_jio_new_feature_enabled)) {
+            iconSizePx = (int) (Utilities.pxFromDp(res.
+                    getInteger(R.integer.config_jio_allapp_icon_size), dm) * scale);
+            iconTextSizePx = (int) (Utilities.pxFromSp(res.
+                    getInteger(R.integer.config_jio_allapp_icon_text_size), dm) * scale);
+        } else {
+            iconSizePx = (int) (Utilities.pxFromDp(invIconSizePx, dm) * scale);
+            iconTextSizePx = (int) (Utilities.pxFromSp(inv.iconTextSize, dm) * scale);
+        }
+
         iconDrawablePaddingPx = (int) (iconDrawablePaddingOriginalPx * scale);
 
         cellHeightPx = iconSizePx + iconDrawablePaddingPx

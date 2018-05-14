@@ -316,4 +316,6 @@
     <!-- Accessibility confirmation for notification being dismissed. -->
     <string name="notification_dismissed">Notification dismissed</string>
 
+    <string name="jio_apps_folder_title">Jio Apps</string>
+
 </resources>
