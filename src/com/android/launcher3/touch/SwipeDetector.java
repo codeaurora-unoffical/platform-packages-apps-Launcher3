@@ -25,6 +25,8 @@ import android.view.MotionEvent;
 import android.view.ViewConfiguration;
 import android.view.animation.Interpolator;
 
+import com.android.launcher3.Utilities;
+
 /**
  * One dimensional scroll/drag/swipe gesture detector.
  *
@@ -42,7 +44,16 @@ public class SwipeDetector {
     public static final int DIRECTION_NEGATIVE = 1 << 1;
     public static final int DIRECTION_BOTH = DIRECTION_NEGATIVE | DIRECTION_POSITIVE;
 
-    private static final float ANIMATION_DURATION = 1200;
+    private static final float ANIMATION_DURATION;
+    static {
+        if (Utilities.getSystemProperty("ro.config.low_ram","").equals("true")) {
+            ANIMATION_DURATION = 600;
+        } else {
+            ANIMATION_DURATION = 1200;
+        }
+        Log.d(TAG,"low ram = "+Utilities.getSystemProperty("ro.config.low_ram",""));
+    }
+
     private static final float FAST_FLING_PX_MS = 10;
 
     protected int mActivePointerId = INVALID_POINTER_ID;
