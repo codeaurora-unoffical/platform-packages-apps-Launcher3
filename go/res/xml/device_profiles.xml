@@ -27,7 +27,7 @@
         launcher:numFolderColumns="4"
         launcher:iconSize="60"
         launcher:iconTextSize="14.0"
-        launcher:defaultLayoutId="@xml/default_workspace_4x4"
+        launcher:defaultLayoutId="@xml/jio_default_workspace_4x4"
         />
 
 </profiles>
