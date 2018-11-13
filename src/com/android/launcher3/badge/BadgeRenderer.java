@@ -27,7 +27,7 @@ import android.graphics.Point;
 import android.graphics.Rect;
 import android.util.Log;
 
-import com.android.launcher3.graphics.ShadowGenerator;
+import com.android.launcher3.icons.ShadowGenerator;
 
 /**
  * Contains parameters necessary to draw a badge for an icon (e.g. the size of the badge).
@@ -60,6 +60,7 @@ public class BadgeRenderer {
 
         int size = (int) (DOT_SCALE * mDotCenterOffset);
         ShadowGenerator.Builder builder = new ShadowGenerator.Builder(Color.TRANSPARENT);
+        builder.ambientShadowAlpha = 88;
         mBackgroundWithShadow = builder.setupBlurForSize(size).createPill(size, size);
         mCircleRadius = builder.radius;
 

@@ -15,6 +15,10 @@
  */
 package com.android.launcher3.ui;
 
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.fail;
+
 import android.app.Instrumentation;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
@@ -26,36 +30,41 @@ import android.graphics.Point;
 import android.os.Process;
 import android.os.RemoteException;
 import android.os.SystemClock;
-import android.support.test.InstrumentationRegistry;
-import android.support.test.uiautomator.By;
-import android.support.test.uiautomator.BySelector;
-import android.support.test.uiautomator.Direction;
-import android.support.test.uiautomator.UiDevice;
-import android.support.test.uiautomator.UiObject2;
-import android.support.test.uiautomator.Until;
 import android.util.Log;
 import android.view.MotionEvent;
 
+import androidx.test.InstrumentationRegistry;
+import androidx.test.uiautomator.By;
+import androidx.test.uiautomator.BySelector;
+import androidx.test.uiautomator.Direction;
+import androidx.test.uiautomator.UiDevice;
+import androidx.test.uiautomator.UiObject2;
+import androidx.test.uiautomator.Until;
+
+import com.android.launcher3.Launcher;
 import com.android.launcher3.LauncherAppState;
 import com.android.launcher3.LauncherAppWidgetProviderInfo;
 import com.android.launcher3.LauncherSettings;
+import com.android.launcher3.LauncherState;
 import com.android.launcher3.MainThreadExecutor;
 import com.android.launcher3.R;
 import com.android.launcher3.compat.AppWidgetManagerCompat;
 import com.android.launcher3.compat.LauncherAppsCompat;
-import com.android.launcher3.config.FeatureFlags;
+import com.android.launcher3.tapl.LauncherInstrumentation;
 import com.android.launcher3.testcomponent.AppWidgetNoConfig;
 import com.android.launcher3.testcomponent.AppWidgetWithConfig;
+import com.android.launcher3.util.Wait;
+import com.android.launcher3.util.rule.LauncherActivityRule;
 
+import org.junit.After;
 import org.junit.Before;
+import org.junit.Rule;
 
-import java.util.Locale;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * Base class for all instrumentation tests providing various utility methods.
@@ -66,22 +75,40 @@ public abstract class AbstractLauncherUiTest {
     public static final long DEFAULT_BROADCAST_TIMEOUT_SECS = 5;
 
     public static final long SHORT_UI_TIMEOUT= 300;
-    public static final long DEFAULT_UI_TIMEOUT = 3000;
-    public static final long LARGE_UI_TIMEOUT = 10000;
+    public static final long DEFAULT_UI_TIMEOUT = 10000;
     public static final long DEFAULT_WORKER_TIMEOUT_SECS = 5;
 
     protected MainThreadExecutor mMainThreadExecutor = new MainThreadExecutor();
-    protected UiDevice mDevice;
+    protected final UiDevice mDevice;
+    protected final LauncherInstrumentation mLauncher;
     protected Context mTargetContext;
     protected String mTargetPackage;
+    protected final boolean mIsInLauncherProcess;
 
     private static final String TAG = "AbstractLauncherUiTest";
 
+    protected AbstractLauncherUiTest() {
+        final Instrumentation instrumentation = getInstrumentation();
+        mDevice = UiDevice.getInstance(instrumentation);
+        mLauncher = new LauncherInstrumentation(instrumentation);
+
+        mIsInLauncherProcess = instrumentation.getTargetContext().getPackageName().equals(
+                mDevice.getLauncherPackageName());
+    }
+
+    @Rule
+    public LauncherActivityRule mActivityMonitor = new LauncherActivityRule();
+
     @Before
     public void setUp() throws Exception {
-        mDevice = UiDevice.getInstance(getInstrumentation());
         mTargetContext = InstrumentationRegistry.getTargetContext();
         mTargetPackage = mTargetContext.getPackageName();
+        mDevice.executeShellCommand("settings put global heads_up_notifications_enabled 0");
+    }
+
+    @After
+    public void tearDown() throws Exception {
+        mDevice.executeShellCommand("settings put global heads_up_notifications_enabled 1");
     }
 
     protected void lockRotation(boolean naturalOrientation) throws RemoteException {
@@ -101,19 +128,12 @@ public abstract class AbstractLauncherUiTest {
      */
     protected UiObject2 openAllApps() {
         mDevice.waitForIdle();
-        if (FeatureFlags.NO_ALL_APPS_ICON) {
-            UiObject2 hotseat = mDevice.wait(
-                    Until.findObject(getSelectorForId(R.id.hotseat)), 2500);
-            Point start = hotseat.getVisibleCenter();
-            int endY = (int) (mDevice.getDisplayHeight() * 0.1f);
-            // 100 px/step
-            mDevice.swipe(start.x, start.y, start.x, endY, (start.y - endY) / 100);
-
-        } else {
-            mDevice.wait(Until.findObject(
-                    By.desc(mTargetContext.getString(R.string.all_apps_button_label))),
-                    DEFAULT_UI_TIMEOUT).click();
-        }
+        UiObject2 hotseat = mDevice.wait(
+                Until.findObject(getSelectorForId(R.id.hotseat)), 2500);
+        Point start = hotseat.getVisibleCenter();
+        int endY = (int) (mDevice.getDisplayHeight() * 0.1f);
+        // 100 px/step
+        mDevice.swipe(start.x, start.y, start.x, endY, (start.y - endY) / 100);
         return findViewById(R.id.apps_list_view);
     }
 
@@ -132,15 +152,20 @@ public abstract class AbstractLauncherUiTest {
      * @return the matching object.
      */
     protected UiObject2 scrollAndFind(UiObject2 container, BySelector condition) {
-        do {
+        container.setGestureMargins(0, 0, 0, 200);
+
+        int i = 0;
+        for (; ; ) {
             // findObject can only execute after spring settles.
             mDevice.wait(Until.findObject(condition), SHORT_UI_TIMEOUT);
             UiObject2 widget = container.findObject(condition);
-            if (widget != null) {
+            if (widget != null && widget.getVisibleBounds().intersects(
+                    0, 0, mDevice.getDisplayWidth(), mDevice.getDisplayHeight() - 200)) {
                 return widget;
             }
-        } while (container.scroll(Direction.DOWN, 1f));
-        return container.findObject(condition);
+            if (++i > 40) fail("Too many attempts");
+            container.scroll(Direction.DOWN, 1f);
+        }
     }
 
     /**
@@ -243,6 +268,38 @@ public abstract class AbstractLauncherUiTest {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    protected <T> T getFromLauncher(Function<Launcher, T> f) {
+        if (!mIsInLauncherProcess) return null;
+        return getOnUiThread(() -> f.apply(mActivityMonitor.getActivity()));
+    }
+
+    protected void executeOnLauncher(Consumer<Launcher> f) {
+        getFromLauncher(launcher -> {
+            f.accept(launcher);
+            return null;
+        });
+    }
+
+    // Cannot be used in TaplTests between a Tapl call injecting a gesture and a tapl call expecting
+    // the results of that gesture because the wait can hide flakeness.
+    protected boolean waitForState(LauncherState state) {
+        return waitForLauncherCondition(launcher -> launcher.getStateManager().getState() == state);
+    }
+
+    // Cannot be used in TaplTests after injecting any gesture using Tapl because this can hide
+    // flakiness.
+    protected boolean waitForLauncherCondition(Function<Launcher, Boolean> condition) {
+        return waitForLauncherCondition(condition, DEFAULT_ACTIVITY_TIMEOUT);
+    }
+
+    // Cannot be used in TaplTests after injecting any gesture using Tapl because this can hide
+    // flakiness.
+    protected boolean waitForLauncherCondition(
+            Function<Launcher, Boolean> condition, long timeout) {
+        if (!mIsInLauncherProcess) return true;
+        return Wait.atMost(() -> getFromLauncher(condition), timeout);
     }
 
     /**

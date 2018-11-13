@@ -34,7 +34,7 @@ import android.graphics.drawable.Drawable;
 import android.util.Property;
 import android.util.SparseArray;
 
-import com.android.launcher3.graphics.BitmapInfo;
+import com.android.launcher3.icons.BitmapInfo;
 
 public class FastBitmapDrawable extends Drawable {
 
@@ -109,7 +109,7 @@ public class FastBitmapDrawable extends Drawable {
 
     @Override
     public final void draw(Canvas canvas) {
-        if (mScaleAnimation != null) {
+        if (mScale != 1f) {
             int count = canvas.save();
             Rect bounds = getBounds();
             canvas.scale(mScale, mScale, bounds.exactCenterX(), bounds.exactCenterY());
@@ -150,8 +150,21 @@ public class FastBitmapDrawable extends Drawable {
         return mAlpha;
     }
 
+    public void setScale(float scale) {
+        if (mScaleAnimation != null) {
+            mScaleAnimation.cancel();
+            mScaleAnimation = null;
+        }
+        mScale = scale;
+        invalidateSelf();
+    }
+
     public float getAnimatedScale() {
         return mScaleAnimation == null ? 1 : mScale;
+    }
+
+    public float getScale() {
+        return mScale;
     }
 
     @Override

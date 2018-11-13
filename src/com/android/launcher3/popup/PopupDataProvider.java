@@ -18,7 +18,6 @@ package com.android.launcher3.popup;
 
 import android.content.ComponentName;
 import android.service.notification.StatusBarNotification;
-import android.support.annotation.NonNull;
 import android.util.Log;
 
 import com.android.launcher3.ItemInfo;
@@ -41,6 +40,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import androidx.annotation.NonNull;
+
 /**
  * Provides data for the popup menu that appears after long-clicking on apps.
  */
@@ -48,13 +49,6 @@ public class PopupDataProvider implements NotificationListener.NotificationsChan
 
     private static final boolean LOGD = false;
     private static final String TAG = "PopupDataProvider";
-
-    /** Note that these are in order of priority. */
-    private static final SystemShortcut[] SYSTEM_SHORTCUTS = new SystemShortcut[] {
-            new SystemShortcut.AppInfo(),
-            new SystemShortcut.Widgets(),
-            new SystemShortcut.Install()
-    };
 
     private final Launcher mLauncher;
 
@@ -189,16 +183,6 @@ public class PopupDataProvider implements NotificationListener.NotificationsChan
         NotificationListener notificationListener = NotificationListener.getInstanceIfConnected();
         return notificationListener == null ? Collections.EMPTY_LIST
                 : notificationListener.getNotificationsForKeys(notificationKeys);
-    }
-
-    public @NonNull List<SystemShortcut> getEnabledSystemShortcutsForItem(ItemInfo info) {
-        List<SystemShortcut> systemShortcuts = new ArrayList<>();
-        for (SystemShortcut systemShortcut : SYSTEM_SHORTCUTS) {
-            if (systemShortcut.getOnClickListener(mLauncher, info) != null) {
-                systemShortcuts.add(systemShortcut);
-            }
-        }
-        return systemShortcuts;
     }
 
     public void cancelNotification(String notificationKey) {

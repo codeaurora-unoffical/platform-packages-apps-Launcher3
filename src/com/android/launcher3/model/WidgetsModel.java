@@ -8,11 +8,11 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.Process;
 import android.os.UserHandle;
-import android.support.annotation.Nullable;
 import android.util.Log;
 
 import com.android.launcher3.AppFilter;
-import com.android.launcher3.IconCache;
+import com.android.launcher3.icons.ComponentWithLabel;
+import com.android.launcher3.icons.IconCache;
 import com.android.launcher3.InvariantDeviceProfile;
 import com.android.launcher3.LauncherAppState;
 import com.android.launcher3.LauncherAppWidgetProviderInfo;
@@ -32,7 +32,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Set;
+
+import androidx.annotation.Nullable;
 
 /**
  * Widgets data model that is used by the adapters of the widget views and controllers.
@@ -75,26 +80,32 @@ public class WidgetsModel {
      * @param packageUser If null, all widgets and shortcuts are updated and returned, otherwise
      *                    only widgets and shortcuts associated with the package/user are.
      */
-    public void update(LauncherAppState app, @Nullable PackageUserKey packageUser) {
+    public List<ComponentWithLabel> update(LauncherAppState app, @Nullable PackageUserKey packageUser) {
         Preconditions.assertWorkerThread();
 
         Context context = app.getContext();
         final ArrayList<WidgetItem> widgetsAndShortcuts = new ArrayList<>();
+        List<ComponentWithLabel> updatedItems = new ArrayList<>();
         try {
-            PackageManager pm = context.getPackageManager();
             InvariantDeviceProfile idp = app.getInvariantDeviceProfile();
+            PackageManager pm = app.getContext().getPackageManager();
 
             // Widgets
             AppWidgetManagerCompat widgetManager = AppWidgetManagerCompat.getInstance(context);
             for (AppWidgetProviderInfo widgetInfo : widgetManager.getAllProviders(packageUser)) {
-                widgetsAndShortcuts.add(new WidgetItem(LauncherAppWidgetProviderInfo
-                        .fromProviderInfo(context, widgetInfo), pm, idp));
+                LauncherAppWidgetProviderInfo launcherWidgetInfo =
+                        LauncherAppWidgetProviderInfo.fromProviderInfo(context, widgetInfo);
+
+                widgetsAndShortcuts.add(new WidgetItem(
+                        launcherWidgetInfo, idp, app.getIconCache()));
+                updatedItems.add(launcherWidgetInfo);
             }
 
             // Shortcuts
             for (ShortcutConfigActivityInfo info : LauncherAppsCompat.getInstance(context)
                     .getCustomShortcutActivityList(packageUser)) {
-                widgetsAndShortcuts.add(new WidgetItem(info));
+                widgetsAndShortcuts.add(new WidgetItem(info, app.getIconCache(), pm));
+                updatedItems.add(info);
             }
             setWidgetsAndShortcuts(widgetsAndShortcuts, app, packageUser);
         } catch (Exception e) {
@@ -109,6 +120,7 @@ public class WidgetsModel {
         }
 
         app.getWidgetCache().removeObsoletePreviews(widgetsAndShortcuts, packageUser);
+        return updatedItems;
     }
 
     private synchronized void setWidgetsAndShortcuts(ArrayList<WidgetItem> rawWidgetsShortcuts,
@@ -201,6 +213,28 @@ public class WidgetsModel {
         IconCache iconCache = app.getIconCache();
         for (PackageItemInfo p : tmpPackageItemInfos.values()) {
             iconCache.getTitleAndIconForApp(p, true /* userLowResIcon */);
+        }
+    }
+
+    public void onPackageIconsUpdated(Set<String> packageNames, UserHandle user,
+            LauncherAppState app) {
+        for (Entry<PackageItemInfo, ArrayList<WidgetItem>> entry : mWidgetsList.entrySet()) {
+            if (packageNames.contains(entry.getKey().packageName)) {
+                ArrayList<WidgetItem> items = entry.getValue();
+                int count = items.size();
+                for (int i = 0; i < count; i++) {
+                    WidgetItem item = items.get(i);
+                    if (item.user.equals(user)) {
+                        if (item.activityInfo != null) {
+                            items.set(i, new WidgetItem(item.activityInfo, app.getIconCache(),
+                                    app.getContext().getPackageManager()));
+                        } else {
+                            items.set(i, new WidgetItem(item.widgetInfo,
+                                    app.getInvariantDeviceProfile(), app.getIconCache()));
+                        }
+                    }
+                }
+            }
         }
     }
 }

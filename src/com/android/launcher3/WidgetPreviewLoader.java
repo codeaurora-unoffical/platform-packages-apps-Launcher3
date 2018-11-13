@@ -25,15 +25,15 @@ import android.os.AsyncTask;
 import android.os.CancellationSignal;
 import android.os.Handler;
 import android.os.UserHandle;
-import android.support.annotation.Nullable;
 import android.util.Log;
 import android.util.LongSparseArray;
 
 import com.android.launcher3.compat.AppWidgetManagerCompat;
 import com.android.launcher3.compat.ShortcutConfigActivityInfo;
 import com.android.launcher3.compat.UserManagerCompat;
-import com.android.launcher3.graphics.LauncherIcons;
-import com.android.launcher3.graphics.ShadowGenerator;
+import com.android.launcher3.icons.LauncherIcons;
+import com.android.launcher3.icons.ShadowGenerator;
+import com.android.launcher3.icons.IconCache;
 import com.android.launcher3.model.WidgetItem;
 import com.android.launcher3.util.ComponentKey;
 import com.android.launcher3.util.PackageUserKey;
@@ -50,6 +50,8 @@ import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
+
+import androidx.annotation.Nullable;
 
 public class WidgetPreviewLoader {
 

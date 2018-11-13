@@ -31,7 +31,6 @@ import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.Process;
 import android.os.UserHandle;
-import android.support.annotation.Nullable;
 import android.text.TextUtils;
 import android.util.Log;
 import android.util.Pair;
@@ -39,7 +38,8 @@ import android.util.Pair;
 import com.android.launcher3.compat.LauncherAppsCompat;
 import com.android.launcher3.compat.PackageInstallerCompat.PackageInstallInfo;
 import com.android.launcher3.compat.UserManagerCompat;
-import com.android.launcher3.graphics.LauncherIcons;
+import com.android.launcher3.icons.LauncherIcons;
+import com.android.launcher3.icons.IconCache;
 import com.android.launcher3.model.AddWorkspaceItemsTask;
 import com.android.launcher3.model.BaseModelUpdateTask;
 import com.android.launcher3.model.BgDataModel;
@@ -73,6 +73,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.Executor;
+
+import androidx.annotation.Nullable;
 
 /**
  * Maintains in-memory state of the Launcher. It is expected that there should be only one
@@ -143,9 +145,10 @@ public class LauncherModel extends BroadcastReceiver
         public void bindItems(List<ItemInfo> shortcuts, boolean forceAnimateIcons);
         public void bindScreens(ArrayList<Long> orderedScreenIds);
         public void finishFirstPageBind(ViewOnDrawExecutor executor);
-        public void finishBindingItems();
+        public void finishBindingItems(int currentScreen);
         public void bindAllApplications(ArrayList<AppInfo> apps);
         public void bindAppsAddedOrUpdated(ArrayList<AppInfo> apps);
+        public void preAddApps();
         public void bindAppsAdded(ArrayList<Long> newScreens,
                                   ArrayList<ItemInfo> addNotAnimated,
                                   ArrayList<ItemInfo> addAnimated);
@@ -195,6 +198,10 @@ public class LauncherModel extends BroadcastReceiver
      * Adds the provided items to the workspace.
      */
     public void addAndBindAddedWorkspaceItems(List<Pair<ItemInfo, Object>> itemList) {
+        Callbacks callbacks = getCallback();
+        if (callbacks != null) {
+            callbacks.preAddApps();
+        }
         enqueueModelUpdateTask(new AddWorkspaceItemsTask(itemList));
     }
 
@@ -592,6 +599,19 @@ public class LauncherModel extends BroadcastReceiver
                 CacheDataUpdatedTask.OP_CACHE_UPDATE, user, updatedPackages));
     }
 
+    /**
+     * Called when the labels for the widgets has updated in the icon cache.
+     */
+    public void onWidgetLabelsUpdated(HashSet<String> updatedPackages, UserHandle user) {
+        enqueueModelUpdateTask(new BaseModelUpdateTask() {
+            @Override
+            public void execute(LauncherAppState app, BgDataModel dataModel, AllAppsList apps) {
+                dataModel.widgetsModel.onPackageIconsUpdated(updatedPackages, user, app);
+                bindUpdatedWidgets(dataModel);
+            }
+        });
+    }
+
     public void enqueueModelUpdateTask(ModelUpdateTask task) {
         task.init(mApp, this, sBgDataModel, mBgAllAppsList, mUiExecutor);
         runOnWorkerThread(task);
@@ -620,15 +640,12 @@ public class LauncherModel extends BroadcastReceiver
     }
 
     public void updateAndBindShortcutInfo(final ShortcutInfo si, final ShortcutInfoCompat info) {
-        updateAndBindShortcutInfo(new Provider<ShortcutInfo>() {
-            @Override
-            public ShortcutInfo get() {
-                si.updateFromDeepShortcutInfo(info, mApp.getContext());
-                LauncherIcons li = LauncherIcons.obtain(mApp.getContext());
-                li.createShortcutIcon(info).applyTo(si);
-                li.recycle();
-                return si;
-            }
+        updateAndBindShortcutInfo(() -> {
+            si.updateFromDeepShortcutInfo(info, mApp.getContext());
+            LauncherIcons li = LauncherIcons.obtain(mApp.getContext());
+            li.createShortcutIcon(info).applyTo(si);
+            li.recycle();
+            return si;
         });
     }
 

@@ -20,6 +20,8 @@ import static com.android.launcher3.ItemInfoWithIcon.FLAG_DISABLED_LOCKED_USER;
 import static com.android.launcher3.ItemInfoWithIcon.FLAG_DISABLED_SAFEMODE;
 import static com.android.launcher3.ItemInfoWithIcon.FLAG_DISABLED_SUSPENDED;
 import static com.android.launcher3.folder.ClippedFolderIconLayoutRule.MAX_NUM_ITEMS_IN_PREVIEW;
+import static com.android.launcher3.icons.CachingLogic.COMPONENT_WITH_LABEL;
+import static com.android.launcher3.icons.CachingLogic.LAUNCHER_ACTIVITY_INFO;
 import static com.android.launcher3.model.LoaderResults.filterCurrentWorkspaceItems;
 
 import android.appwidget.AppWidgetProviderInfo;
@@ -43,7 +45,9 @@ import android.util.MutableInt;
 import com.android.launcher3.AllAppsList;
 import com.android.launcher3.AppInfo;
 import com.android.launcher3.FolderInfo;
-import com.android.launcher3.IconCache;
+import com.android.launcher3.icons.ComponentWithLabel;
+import com.android.launcher3.icons.IconCacheUpdateHandler;
+import com.android.launcher3.icons.IconCache;
 import com.android.launcher3.InstallShortcutReceiver;
 import com.android.launcher3.ItemInfo;
 import com.android.launcher3.LauncherAppState;
@@ -59,7 +63,7 @@ import com.android.launcher3.compat.UserManagerCompat;
 import com.android.launcher3.config.FeatureFlags;
 import com.android.launcher3.folder.Folder;
 import com.android.launcher3.folder.FolderIconPreviewVerifier;
-import com.android.launcher3.graphics.LauncherIcons;
+import com.android.launcher3.icons.LauncherIcons;
 import com.android.launcher3.logging.FileLog;
 import com.android.launcher3.provider.ImportDataTask;
 import com.android.launcher3.shortcuts.DeepShortcutManager;
@@ -182,7 +186,7 @@ public class LoaderTask implements Runnable {
 
             // second step
             TraceHelper.partitionSection(TAG, "step 2.1: loading all apps");
-            loadAllApps();
+            List<LauncherActivityInfo> allActivityList = loadAllApps();
 
             TraceHelper.partitionSection(TAG, "step 2.2: Binding all apps");
             verifyNotStopped();
@@ -190,7 +194,10 @@ public class LoaderTask implements Runnable {
 
             verifyNotStopped();
             TraceHelper.partitionSection(TAG, "step 2.3: Update icon cache");
-            updateIconCache();
+            IconCacheUpdateHandler updateHandler = mIconCache.getUpdateHandler();
+            setIgnorePackages(updateHandler);
+            updateHandler.updateIcons(allActivityList, LAUNCHER_ACTIVITY_INFO,
+                    mApp.getModel()::onPackageIconsUpdated);
 
             // Take a break
             TraceHelper.partitionSection(TAG, "step 2 completed, wait for idle");
@@ -212,11 +219,20 @@ public class LoaderTask implements Runnable {
 
             // fourth step
             TraceHelper.partitionSection(TAG, "step 4.1: loading widgets");
-            mBgDataModel.widgetsModel.update(mApp, null);
+            List<ComponentWithLabel> allWidgetsList = mBgDataModel.widgetsModel.update(mApp, null);
 
             verifyNotStopped();
             TraceHelper.partitionSection(TAG, "step 4.2: Binding widgets");
             mResults.bindWidgets();
+
+            verifyNotStopped();
+            TraceHelper.partitionSection(TAG, "step 4.3: Update icon cache");
+            updateHandler.updateIcons(allWidgetsList, COMPONENT_WITH_LABEL,
+                    mApp.getModel()::onWidgetLabelsUpdated);
+
+            verifyNotStopped();
+            TraceHelper.partitionSection(TAG, "step 5: Finish icon cache update");
+            updateHandler.finish();
 
             transaction.commit();
         } catch (CancellationException e) {
@@ -381,24 +397,16 @@ public class LoaderTask implements Runnable {
                                     // no special handling necessary for this item
                                     c.markRestored();
                                 } else {
-                                    if (c.hasRestoreFlag(ShortcutInfo.FLAG_AUTOINSTALL_ICON)) {
-                                        // We allow auto install apps to have their intent
-                                        // updated after an install.
-                                        intent = pmHelper.getAppLaunchIntent(targetPkg, c.user);
-                                        if (intent != null) {
-                                            c.restoreFlag = 0;
-                                            c.updater().put(
-                                                    LauncherSettings.Favorites.INTENT,
-                                                    intent.toUri(0)).commit();
-                                            cn = intent.getComponent();
-                                        } else {
-                                            c.markDeleted("Unable to find a launch target");
-                                            continue;
-                                        }
+                                    // Gracefully try to find a fallback activity.
+                                    intent = pmHelper.getAppLaunchIntent(targetPkg, c.user);
+                                    if (intent != null) {
+                                        c.restoreFlag = 0;
+                                        c.updater().put(
+                                                LauncherSettings.Favorites.INTENT,
+                                                intent.toUri(0)).commit();
+                                        cn = intent.getComponent();
                                     } else {
-                                        // The app is installed but the component is no
-                                        // longer available.
-                                        c.markDeleted("Invalid component removed: " + cn);
+                                        c.markDeleted("Unable to find a launch target");
                                         continue;
                                     }
                                 }
@@ -478,15 +486,11 @@ public class LoaderTask implements Runnable {
                                     }
                                     info = new ShortcutInfo(pinnedShortcut, context);
                                     final ShortcutInfo finalInfo = info;
-                                    Provider<Bitmap> fallbackIconProvider = new Provider<Bitmap>() {
-                                        @Override
-                                        public Bitmap get() {
-                                            // If the pinned deep shortcut is no longer published,
-                                            // use the last saved icon instead of the default.
-                                            return c.loadIcon(finalInfo)
-                                                    ? finalInfo.iconBitmap : null;
-                                        }
-                                    };
+                                    // If the pinned deep shortcut is no longer published,
+                                    // use the last saved icon instead of the default.
+                                    Provider<Bitmap> fallbackIconProvider = () ->
+                                            c.loadIcon(finalInfo) ? finalInfo.iconBitmap : null;
+
                                     LauncherIcons li = LauncherIcons.obtain(context);
                                     li.createShortcutIcon(pinnedShortcut,
                                             true /* badged */, fallbackIconProvider).applyTo(info);
@@ -746,7 +750,7 @@ public class LoaderTask implements Runnable {
 
                 int numItemsInPreview = 0;
                 for (ShortcutInfo info : folder.contents) {
-                    if (info.usingLowResIcon
+                    if (info.usingLowResIcon()
                             && info.itemType == LauncherSettings.Favorites.ITEM_TYPE_APPLICATION
                             && verifier.isItemInPreview(info.rank)) {
                         mIconCache.getTitleAndIcon(info, false);
@@ -786,7 +790,7 @@ public class LoaderTask implements Runnable {
         }
     }
 
-    private void updateIconCache() {
+    private void setIgnorePackages(IconCacheUpdateHandler updateHandler) {
         // Ignore packages which have a promise icon.
         HashSet<String> packagesToIgnore = new HashSet<>();
         synchronized (mBgDataModel) {
@@ -804,12 +808,12 @@ public class LoaderTask implements Runnable {
                 }
             }
         }
-        mIconCache.updateDbIcons(packagesToIgnore);
+        updateHandler.setPackagesToIgnore(Process.myUserHandle(), packagesToIgnore);
     }
 
-    private void loadAllApps() {
+    private List<LauncherActivityInfo> loadAllApps() {
         final List<UserHandle> profiles = mUserManager.getUserProfiles();
-
+        List<LauncherActivityInfo> allActivityList = new ArrayList<>();
         // Clear the list of apps
         mBgAllAppsList.clear();
         for (UserHandle user : profiles) {
@@ -818,7 +822,7 @@ public class LoaderTask implements Runnable {
             // Fail if we don't have any apps
             // TODO: Fix this. Only fail for the current user.
             if (apps == null || apps.isEmpty()) {
-                return;
+                return allActivityList;
             }
             boolean quietMode = mUserManager.isQuietModeEnabled(user);
             // Create the ApplicationInfos
@@ -827,6 +831,7 @@ public class LoaderTask implements Runnable {
                 // This builds the icon bitmaps.
                 mBgAllAppsList.add(new AppInfo(app, user, quietMode), app);
             }
+            allActivityList.addAll(apps);
         }
 
         if (FeatureFlags.LAUNCHER3_PROMISE_APPS_IN_ALL_APPS) {
@@ -839,6 +844,7 @@ public class LoaderTask implements Runnable {
         }
 
         mBgAllAppsList.added = new ArrayList<>();
+        return allActivityList;
     }
 
     private void loadDeepShortcuts() {

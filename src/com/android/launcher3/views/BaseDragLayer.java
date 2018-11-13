@@ -21,6 +21,7 @@ import static com.android.launcher3.Utilities.SINGLE_FRAME_MS;
 import android.content.Context;
 import android.graphics.Rect;
 import android.util.AttributeSet;
+import android.util.Property;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -28,8 +29,6 @@ import android.view.accessibility.AccessibilityEvent;
 import android.widget.FrameLayout;
 
 import com.android.launcher3.AbstractFloatingView;
-import com.android.launcher3.BaseActivity;
-import com.android.launcher3.BaseDraggingActivity;
 import com.android.launcher3.InsettableFrameLayout;
 import com.android.launcher3.Utilities;
 import com.android.launcher3.util.MultiValueAlpha;
@@ -41,7 +40,34 @@ import java.util.ArrayList;
 /**
  * A viewgroup with utility methods for drag-n-drop and touch interception
  */
-public abstract class BaseDragLayer<T extends BaseDraggingActivity> extends InsettableFrameLayout {
+public abstract class BaseDragLayer<T extends Context & ActivityContext>
+        extends InsettableFrameLayout {
+
+    public static final Property<LayoutParams, Integer> LAYOUT_X =
+            new Property<LayoutParams, Integer>(Integer.TYPE, "x") {
+                @Override
+                public Integer get(LayoutParams lp) {
+                    return lp.x;
+                }
+
+                @Override
+                public void set(LayoutParams lp, Integer x) {
+                    lp.x = x;
+                }
+            };
+
+    public static final Property<LayoutParams, Integer> LAYOUT_Y =
+            new Property<LayoutParams, Integer>(Integer.TYPE, "y") {
+                @Override
+                public Integer get(LayoutParams lp) {
+                    return lp.y;
+                }
+
+                @Override
+                public void set(LayoutParams lp, Integer y) {
+                    lp.y = y;
+                }
+            };
 
     protected final int[] mTmpXY = new int[2];
     protected final Rect mHitRect = new Rect();
@@ -55,7 +81,7 @@ public abstract class BaseDragLayer<T extends BaseDraggingActivity> extends Inse
 
     public BaseDragLayer(Context context, AttributeSet attrs, int alphaChannelCount) {
         super(context, attrs);
-        mActivity = (T) BaseActivity.fromContext(context);
+        mActivity = (T) ActivityContext.lookupContext(context);
         mMultiValueAlpha = new MultiValueAlpha(this, alphaChannelCount);
     }
 
@@ -307,38 +333,6 @@ public abstract class BaseDragLayer<T extends BaseDraggingActivity> extends Inse
 
         public LayoutParams(ViewGroup.LayoutParams lp) {
             super(lp);
-        }
-
-        public void setWidth(int width) {
-            this.width = width;
-        }
-
-        public int getWidth() {
-            return width;
-        }
-
-        public void setHeight(int height) {
-            this.height = height;
-        }
-
-        public int getHeight() {
-            return height;
-        }
-
-        public void setX(int x) {
-            this.x = x;
-        }
-
-        public int getX() {
-            return x;
-        }
-
-        public void setY(int y) {
-            this.y = y;
-        }
-
-        public int getY() {
-            return y;
         }
     }
 

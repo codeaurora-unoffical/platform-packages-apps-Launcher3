@@ -25,6 +25,7 @@ import android.text.TextUtils;
 
 import com.android.launcher3.LauncherSettings.Favorites;
 import com.android.launcher3.compat.UserManagerCompat;
+import com.android.launcher3.icons.IconCache;
 import com.android.launcher3.shortcuts.ShortcutInfoCompat;
 import com.android.launcher3.util.ContentWriter;
 
@@ -125,7 +126,7 @@ public class ShortcutInfo extends ItemInfoWithIcon {
                 .put(LauncherSettings.BaseLauncherColumns.INTENT, getIntent())
                 .put(LauncherSettings.Favorites.RESTORED, status);
 
-        if (!usingLowResIcon) {
+        if (!usingLowResIcon()) {
             writer.putIcon(iconBitmap, user);
         }
         if (iconResource != null) {

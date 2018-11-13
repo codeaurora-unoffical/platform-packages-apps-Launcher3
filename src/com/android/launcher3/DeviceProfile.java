@@ -30,7 +30,7 @@ import android.view.WindowManager;
 
 import com.android.launcher3.CellLayout.ContainerType;
 import com.android.launcher3.badge.BadgeRenderer;
-import com.android.launcher3.graphics.IconNormalizer;
+import com.android.launcher3.icons.IconNormalizer;
 
 public class DeviceProfile {
 
@@ -58,6 +58,9 @@ public class DeviceProfile {
     private static final float MAX_HORIZONTAL_PADDING_PERCENT = 0.14f;
 
     private static final float TALL_DEVICE_ASPECT_RATIO_THRESHOLD = 2.0f;
+
+    // To evenly space the icons, increase the left/right margins for tablets in portrait mode.
+    private static final int PORTRAIT_TABLET_LEFT_RIGHT_PADDING_MULTIPLIER = 4;
 
     // Workspace
     public final int desiredWorkspaceLeftRightMarginPx;
@@ -172,7 +175,9 @@ public class DeviceProfile {
         defaultWidgetPadding = AppWidgetHostView.getDefaultPaddingForWidget(context, cn, null);
         edgeMarginPx = res.getDimensionPixelSize(R.dimen.dynamic_grid_edge_margin);
         desiredWorkspaceLeftRightMarginPx = isVerticalBarLayout() ? 0 : edgeMarginPx;
-        cellLayoutPaddingLeftRightPx =
+        int cellLayoutPaddingLeftRightMultiplier = !isVerticalBarLayout() && isTablet
+                ? PORTRAIT_TABLET_LEFT_RIGHT_PADDING_MULTIPLIER : 1;
+        cellLayoutPaddingLeftRightPx = cellLayoutPaddingLeftRightMultiplier *
                 res.getDimensionPixelSize(R.dimen.dynamic_grid_cell_layout_padding);
         cellLayoutBottomPaddingPx =
                 res.getDimensionPixelSize(R.dimen.dynamic_grid_cell_layout_bottom_padding);
@@ -368,7 +373,7 @@ public class DeviceProfile {
         updateFolderCellSize(1f, dm, res);
 
         // Don't let the folder get too close to the edges of the screen.
-        int folderMargin = edgeMarginPx;
+        int folderMargin = edgeMarginPx * 2;
         Point totalWorkspacePadding = getTotalWorkspacePadding();
 
         // Check if the icons fit within the available height.

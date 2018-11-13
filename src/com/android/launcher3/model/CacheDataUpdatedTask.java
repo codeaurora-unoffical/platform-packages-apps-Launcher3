@@ -20,7 +20,7 @@ import android.os.UserHandle;
 
 import com.android.launcher3.AllAppsList;
 import com.android.launcher3.AppInfo;
-import com.android.launcher3.IconCache;
+import com.android.launcher3.icons.IconCache;
 import com.android.launcher3.ItemInfo;
 import com.android.launcher3.LauncherAppState;
 import com.android.launcher3.LauncherModel.CallbackTask;
@@ -64,7 +64,7 @@ public class CacheDataUpdatedTask extends BaseModelUpdateTask {
                     if (si.itemType == LauncherSettings.Favorites.ITEM_TYPE_APPLICATION
                             && isValidShortcut(si) && cn != null
                             && mPackages.contains(cn.getPackageName())) {
-                        iconCache.getTitleAndIcon(si, si.usingLowResIcon);
+                        iconCache.getTitleAndIcon(si, si.usingLowResIcon());
                         updatedShortcuts.add(si);
                     }
                 }

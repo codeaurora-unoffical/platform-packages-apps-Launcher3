@@ -15,6 +15,8 @@
  */
 package com.android.launcher3.widget;
 
+import static android.view.ViewGroup.LayoutParams.MATCH_PARENT;
+
 import static com.android.launcher3.logging.LoggerUtils.newContainerTarget;
 
 import android.content.Context;
@@ -31,13 +33,16 @@ import com.android.launcher3.ItemInfo;
 import com.android.launcher3.R;
 import com.android.launcher3.Utilities;
 import com.android.launcher3.dragndrop.DragOptions;
-import com.android.launcher3.graphics.ColorScrim;
 import com.android.launcher3.touch.ItemLongClickListener;
+import com.android.launcher3.uioverrides.WallpaperColorInfo;
 import com.android.launcher3.userevent.nano.LauncherLogProto.ContainerType;
 import com.android.launcher3.userevent.nano.LauncherLogProto.Target;
 import com.android.launcher3.util.SystemUiController;
 import com.android.launcher3.util.Themes;
 import com.android.launcher3.views.AbstractSlideInView;
+import com.android.launcher3.views.BaseDragLayer;
+
+import androidx.core.graphics.ColorUtils;
 
 /**
  * Base class for various widgets popup
@@ -49,11 +54,11 @@ abstract class BaseWidgetSheet extends AbstractSlideInView
     /* Touch handling related member variables. */
     private Toast mWidgetInstructionToast;
 
-    protected final ColorScrim mColorScrim;
+    protected final View mColorScrim;
 
     public BaseWidgetSheet(Context context, AttributeSet attrs, int defStyleAttr) {
         super(context, attrs, defStyleAttr);
-        mColorScrim = ColorScrim.createExtractedColorScrim(this);
+        mColorScrim = createColorScrim(context);
     }
 
     @Override
@@ -71,7 +76,7 @@ abstract class BaseWidgetSheet extends AbstractSlideInView
     }
 
     @Override
-    public final boolean onLongClick(View v) {
+    public boolean onLongClick(View v) {
         if (!ItemLongClickListener.canStartDrag(mLauncher)) return false;
 
         if (v instanceof WidgetCell) {
@@ -80,9 +85,14 @@ abstract class BaseWidgetSheet extends AbstractSlideInView
         return true;
     }
 
+    protected void attachToContainer() {
+        getPopupContainer().addView(mColorScrim);
+        getPopupContainer().addView(this);
+    }
+
     protected void setTranslationShift(float translationShift) {
         super.setTranslationShift(translationShift);
-        mColorScrim.setProgress(1 - mTranslationShift);
+        mColorScrim.setAlpha(1 - mTranslationShift);
     }
 
     private boolean beginDraggingWidget(WidgetCell v) {
@@ -96,7 +106,7 @@ abstract class BaseWidgetSheet extends AbstractSlideInView
         }
 
         int[] loc = new int[2];
-        mLauncher.getDragLayer().getLocationInDragLayer(image, loc);
+        getPopupContainer().getLocationInDragLayer(image, loc);
 
         new PendingItemDragHelper(v).startDrag(
                 image.getBitmapBounds(), image.getBitmap().getWidth(), image.getWidth(),
@@ -115,17 +125,18 @@ abstract class BaseWidgetSheet extends AbstractSlideInView
 
     protected void onCloseComplete() {
         super.onCloseComplete();
+        getPopupContainer().removeView(mColorScrim);
         clearNavBarColor();
     }
 
     protected void clearNavBarColor() {
-        mLauncher.getSystemUiController().updateUiState(
+        getSystemUiController().updateUiState(
                 SystemUiController.UI_STATE_WIDGET_BOTTOM_SHEET, 0);
     }
 
     protected void setupNavBarColor() {
-        boolean isSheetDark = Themes.getAttrBoolean(mLauncher, R.attr.isMainColorDark);
-        mLauncher.getSystemUiController().updateUiState(
+        boolean isSheetDark = Themes.getAttrBoolean(getContext(), R.attr.isMainColorDark);
+        getSystemUiController().updateUiState(
                 SystemUiController.UI_STATE_WIDGET_BOTTOM_SHEET,
                 isSheetDark ? SystemUiController.FLAG_DARK_NAV : SystemUiController.FLAG_LIGHT_NAV);
     }
@@ -145,4 +156,22 @@ abstract class BaseWidgetSheet extends AbstractSlideInView
 
     protected abstract int getElementsRowCount();
 
+    protected SystemUiController getSystemUiController() {
+        return mLauncher.getSystemUiController();
+    }
+
+    private static View createColorScrim(Context context) {
+        View view = new View(context);
+        view.forceHasOverlappingRendering(false);
+
+        WallpaperColorInfo colors = WallpaperColorInfo.getInstance(context);
+        int alpha = context.getResources().getInteger(R.integer.extracted_color_gradient_alpha);
+        view.setBackgroundColor(ColorUtils.setAlphaComponent(colors.getSecondaryColor(), alpha));
+
+        BaseDragLayer.LayoutParams lp = new BaseDragLayer.LayoutParams(MATCH_PARENT, MATCH_PARENT);
+        lp.ignoreInsets = true;
+        view.setLayoutParams(lp);
+
+        return view;
+    }
 }

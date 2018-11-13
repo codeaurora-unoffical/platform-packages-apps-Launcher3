@@ -11,21 +11,20 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.Intent;
-import android.content.pm.LauncherActivityInfo;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.Bitmap.Config;
 import android.graphics.Color;
 import android.os.Process;
 import android.os.UserHandle;
-import android.support.annotation.NonNull;
-import android.support.test.InstrumentationRegistry;
-import android.support.test.rule.provider.ProviderTestRule;
+import androidx.test.InstrumentationRegistry;
+import androidx.test.rule.provider.ProviderTestRule;
 
 import com.android.launcher3.AllAppsList;
 import com.android.launcher3.AppFilter;
 import com.android.launcher3.AppInfo;
-import com.android.launcher3.IconCache;
+import com.android.launcher3.icons.CachingLogic;
+import com.android.launcher3.icons.IconCache;
 import com.android.launcher3.InvariantDeviceProfile;
 import com.android.launcher3.ItemInfo;
 import com.android.launcher3.LauncherAppState;
@@ -33,7 +32,7 @@ import com.android.launcher3.LauncherModel;
 import com.android.launcher3.LauncherModel.Callbacks;
 import com.android.launcher3.LauncherModel.ModelUpdateTask;
 import com.android.launcher3.LauncherProvider;
-import com.android.launcher3.graphics.BitmapInfo;
+import com.android.launcher3.icons.BitmapInfo;
 import com.android.launcher3.util.ComponentKey;
 import com.android.launcher3.util.Provider;
 import com.android.launcher3.util.TestLauncherProvider;
@@ -48,6 +47,8 @@ import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.Executor;
+
+import androidx.annotation.NonNull;
 
 /**
  * Base class for writing tests for Model update tasks.
@@ -202,10 +203,11 @@ public class BaseModelUpdateTaskTestCase {
         }
 
         @Override
-        protected CacheEntry cacheLocked(
+        protected <T> CacheEntry cacheLocked(
                 @NonNull ComponentName componentName,
-                @NonNull Provider<LauncherActivityInfo> infoProvider,
-                UserHandle user, boolean usePackageIcon, boolean useLowResIcon) {
+                UserHandle user, @NonNull Provider<T> infoProvider,
+                @NonNull CachingLogic<T> cachingLogic,
+                boolean usePackageIcon, boolean useLowResIcon) {
             CacheEntry entry = mCache.get(new ComponentKey(componentName, user));
             if (entry == null) {
                 entry = new CacheEntry();

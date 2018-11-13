@@ -42,6 +42,7 @@ import com.android.launcher3.LauncherStateManager;
 import com.android.launcher3.LauncherStateManager.StateHandler;
 import com.android.launcher3.Utilities;
 import com.android.launcher3.anim.AnimatorPlaybackController;
+import com.android.launcher3.config.FeatureFlags;
 import com.android.launcher3.util.TouchController;
 import com.android.quickstep.OverviewInteractionState;
 import com.android.quickstep.RecentsModel;
@@ -52,35 +53,37 @@ import com.android.systemui.shared.system.WindowManagerWrapper;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintWriter;
+import java.util.ArrayList;
 import java.util.zip.Deflater;
 
 public class UiFactory {
 
     public static TouchController[] createTouchControllers(Launcher launcher) {
-        boolean swipeUpEnabled = OverviewInteractionState.getInstance(launcher)
+        boolean swipeUpEnabled = OverviewInteractionState.INSTANCE.get(launcher)
                 .isSwipeUpGestureEnabled();
-        if (!swipeUpEnabled) {
-            return new TouchController[] {
-                    launcher.getDragController(),
-                    new OverviewToAllAppsTouchController(launcher),
-                    new LauncherTaskViewController(launcher)};
+        ArrayList<TouchController> list = new ArrayList<>();
+        list.add(launcher.getDragController());
+
+        if (!swipeUpEnabled || launcher.getDeviceProfile().isVerticalBarLayout()) {
+            list.add(new OverviewToAllAppsTouchController(launcher));
         }
+
         if (launcher.getDeviceProfile().isVerticalBarLayout()) {
-            return new TouchController[] {
-                    launcher.getDragController(),
-                    new OverviewToAllAppsTouchController(launcher),
-                    new LandscapeEdgeSwipeController(launcher),
-                    new LauncherTaskViewController(launcher)};
+            list.add(new LandscapeEdgeSwipeController(launcher));
         } else {
-            return new TouchController[] {
-                    launcher.getDragController(),
-                    new PortraitStatesTouchController(launcher),
-                    new LauncherTaskViewController(launcher)};
+            list.add(new PortraitStatesTouchController(launcher));
         }
+        if (FeatureFlags.PULL_DOWN_STATUS_BAR && Utilities.IS_DEBUG_DEVICE
+                && !launcher.getDeviceProfile().isMultiWindowMode
+                && !launcher.getDeviceProfile().isVerticalBarLayout()) {
+            list.add(new StatusBarTouchController(launcher));
+        }
+        list.add(new LauncherTaskViewController(launcher));
+        return list.toArray(new TouchController[list.size()]);
     }
 
     public static void setOnTouchControllersChangedListener(Context context, Runnable listener) {
-        OverviewInteractionState.getInstance(context).setOnSwipeUpSettingChangedListener(listener);
+        OverviewInteractionState.INSTANCE.get(context).setOnSwipeUpSettingChangedListener(listener);
     }
 
     public static StateHandler[] getStateHandler(Launcher launcher) {
@@ -100,7 +103,7 @@ public class UiFactory {
             shouldBackButtonBeHidden = AbstractFloatingView.getTopOpenViewWithType(launcher,
                     TYPE_ALL & ~TYPE_HIDE_BACK_BUTTON) == null;
         }
-        OverviewInteractionState.getInstance(launcher)
+        OverviewInteractionState.INSTANCE.get(launcher)
                 .setBackButtonAlpha(shouldBackButtonBeHidden ? 0 : 1, true /* animate */);
     }
 
@@ -122,7 +125,7 @@ public class UiFactory {
 
                 @Override
                 public void onStateTransitionComplete(LauncherState finalState) {
-                    boolean swipeUpEnabled = OverviewInteractionState.getInstance(launcher)
+                    boolean swipeUpEnabled = OverviewInteractionState.INSTANCE.get(launcher)
                             .isSwipeUpGestureEnabled();
                     LauncherState prevState = launcher.getStateManager().getLastState();
 
@@ -159,19 +162,29 @@ public class UiFactory {
     }
 
     public static void onStart(Context context) {
-        RecentsModel model = RecentsModel.getInstance(context);
+        RecentsModel model = RecentsModel.INSTANCE.get(context);
         if (model != null) {
             model.onStart();
         }
     }
 
+    public static void onEnterAnimationComplete(Context context) {
+        // After the transition to home, enable the high-res thumbnail loader if it wasn't enabled
+        // as a part of quickstep/scrub, so that high-res thumbnails can load the next time we
+        // enter overview
+        RecentsModel.INSTANCE.get(context).getRecentsTaskLoader()
+                .getHighResThumbnailLoader().setVisible(true);
+    }
+
     public static void onLauncherStateOrResumeChanged(Launcher launcher) {
         LauncherState state = launcher.getStateManager().getState();
-        DeviceProfile profile = launcher.getDeviceProfile();
-        WindowManagerWrapper.getInstance().setShelfHeight(
-                (state == NORMAL || state == OVERVIEW) && launcher.isUserActive()
-                        && !profile.isVerticalBarLayout(),
-                profile.hotseatBarSizePx);
+        if (!OverviewInteractionState.INSTANCE.get(launcher).swipeGestureInitializing()) {
+            DeviceProfile profile = launcher.getDeviceProfile();
+            WindowManagerWrapper.getInstance().setShelfHeight(
+                    (state == NORMAL || state == OVERVIEW) && launcher.isUserActive()
+                            && !profile.isVerticalBarLayout(),
+                    profile.hotseatBarSizePx);
+        }
 
         if (state == NORMAL) {
             launcher.<RecentsView>getOverviewPanel().setSwipeDownShouldLaunchApp(false);
@@ -179,7 +192,7 @@ public class UiFactory {
     }
 
     public static void onTrimMemory(Context context, int level) {
-        RecentsModel model = RecentsModel.getInstance(context);
+        RecentsModel model = RecentsModel.INSTANCE.get(context);
         if (model != null) {
             model.onTrimMemory(level);
         }

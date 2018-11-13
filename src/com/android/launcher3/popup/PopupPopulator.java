@@ -20,13 +20,11 @@ import android.content.ComponentName;
 import android.os.Handler;
 import android.os.UserHandle;
 import android.service.notification.StatusBarNotification;
-import android.support.annotation.Nullable;
-import android.support.annotation.VisibleForTesting;
 
 import com.android.launcher3.ItemInfo;
 import com.android.launcher3.Launcher;
 import com.android.launcher3.ShortcutInfo;
-import com.android.launcher3.graphics.LauncherIcons;
+import com.android.launcher3.icons.LauncherIcons;
 import com.android.launcher3.notification.NotificationInfo;
 import com.android.launcher3.notification.NotificationKeyData;
 import com.android.launcher3.shortcuts.DeepShortcutManager;
@@ -39,6 +37,9 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
+
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 
 /**
  * Contains logic relevant to populating a {@link PopupContainerWithArrow}. In particular,
