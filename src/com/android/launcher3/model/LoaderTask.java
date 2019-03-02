@@ -31,7 +31,6 @@ import android.content.IntentFilter;
 import android.content.pm.LauncherActivityInfo;
 import android.content.pm.PackageInstaller;
 import android.content.pm.PackageInstaller.SessionInfo;
-import android.graphics.Bitmap;
 import android.os.Handler;
 import android.os.Process;
 import android.os.UserHandle;
@@ -43,12 +42,9 @@ import android.util.MutableInt;
 import com.android.launcher3.AllAppsList;
 import com.android.launcher3.AppInfo;
 import com.android.launcher3.FolderInfo;
-import com.android.launcher3.icons.ComponentWithLabel;
-import com.android.launcher3.icons.ComponentWithLabel.ComponentCachingLogic;
-import com.android.launcher3.icons.cache.IconCacheUpdateHandler;
-import com.android.launcher3.icons.IconCache;
 import com.android.launcher3.InstallShortcutReceiver;
 import com.android.launcher3.ItemInfo;
+import com.android.launcher3.ItemInfoWithIcon;
 import com.android.launcher3.LauncherAppState;
 import com.android.launcher3.LauncherAppWidgetInfo;
 import com.android.launcher3.LauncherModel;
@@ -62,19 +58,21 @@ import com.android.launcher3.compat.UserManagerCompat;
 import com.android.launcher3.config.FeatureFlags;
 import com.android.launcher3.folder.Folder;
 import com.android.launcher3.folder.FolderIconPreviewVerifier;
+import com.android.launcher3.icons.ComponentWithLabel;
+import com.android.launcher3.icons.ComponentWithLabel.ComponentCachingLogic;
+import com.android.launcher3.icons.IconCache;
 import com.android.launcher3.icons.LauncherActivtiyCachingLogic;
 import com.android.launcher3.icons.LauncherIcons;
+import com.android.launcher3.icons.cache.IconCacheUpdateHandler;
 import com.android.launcher3.logging.FileLog;
 import com.android.launcher3.provider.ImportDataTask;
 import com.android.launcher3.shortcuts.DeepShortcutManager;
 import com.android.launcher3.shortcuts.ShortcutInfoCompat;
 import com.android.launcher3.shortcuts.ShortcutKey;
 import com.android.launcher3.util.ComponentKey;
-import com.android.launcher3.util.IntArray;
 import com.android.launcher3.util.LooperIdleLock;
 import com.android.launcher3.util.MultiHashMap;
 import com.android.launcher3.util.PackageManagerHelper;
-import com.android.launcher3.util.Provider;
 import com.android.launcher3.util.TraceHelper;
 
 import java.util.ArrayList;
@@ -84,6 +82,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
+import java.util.function.Supplier;
 
 /**
  * Runnable for the thread that loads the contents of the launcher:
@@ -125,11 +124,6 @@ public class LoaderTask implements Runnable {
         mPackageInstaller = PackageInstallerCompat.getInstance(mApp.getContext());
         mAppWidgetManager = AppWidgetManagerCompat.getInstance(mApp.getContext());
         mIconCache = mApp.getIconCache();
-        if (com.android.launcher3.Utilities.IS_RUNNING_IN_TEST_HARNESS
-                && com.android.launcher3.Utilities.IS_DEBUG_DEVICE) {
-            android.util.Log.d("b/117332845",
-                    android.util.Log.getStackTraceString(new Throwable()));
-        }
     }
 
     protected synchronized void waitForIdle() {
@@ -156,9 +150,9 @@ public class LoaderTask implements Runnable {
             allItems.addAll(mBgDataModel.workspaceItems);
             allItems.addAll(mBgDataModel.appWidgets);
         }
-        int firstScreen = mBgDataModel.workspaceScreens.isEmpty()
-                ? -1 // In this case, we can still look at the items in the hotseat.
-                : mBgDataModel.workspaceScreens.get(0);
+        // Screen set is never empty
+        final int firstScreen = mBgDataModel.collectWorkspaceScreens().get(0);
+
         filterCurrentWorkspaceItems(firstScreen, allItems, firstScreenItems,
                 new ArrayList<>() /* otherScreenItems are ignored */);
         mFirstScreenBroadcast.sendBroadcasts(mApp.getContext(), firstScreenItems);
@@ -270,8 +264,7 @@ public class LoaderTask implements Runnable {
             clearDb = true;
         }
 
-        if (!clearDb && GridSizeMigrationTask.ENABLED &&
-                !GridSizeMigrationTask.migrateGridIfNeeded(context)) {
+        if (!clearDb && !GridSizeMigrationTask.migrateGridIfNeeded(context)) {
             // Migration failed. Clear workspace.
             clearDb = true;
         }
@@ -292,7 +285,6 @@ public class LoaderTask implements Runnable {
             final HashMap<String, SessionInfo> installingPkgs =
                     mPackageInstaller.updateAndGetActiveSessionCache();
             mFirstScreenBroadcast = new FirstScreenBroadcast(installingPkgs);
-            mBgDataModel.workspaceScreens.addAll(LauncherModel.loadWorkspaceScreensDb(context));
 
             Map<ShortcutKey, ShortcutInfoCompat> shortcutKeyToPinnedShortcuts = new HashMap<>();
             final LoaderCursor c = new LoaderCursor(contentResolver.query(
@@ -493,12 +485,12 @@ public class LoaderTask implements Runnable {
                                     }
                                     info = new ShortcutInfo(pinnedShortcut, context);
                                     final ShortcutInfo finalInfo = info;
-                                    // If the pinned deep shortcut is no longer published,
-                                    // use the last saved icon instead of the default.
-                                    Provider<Bitmap> fallbackIconProvider = () ->
-                                            c.loadIcon(finalInfo) ? finalInfo.iconBitmap : null;
 
                                     LauncherIcons li = LauncherIcons.obtain(context);
+                                    // If the pinned deep shortcut is no longer published,
+                                    // use the last saved icon instead of the default.
+                                    Supplier<ItemInfoWithIcon> fallbackIconProvider = () ->
+                                            c.loadIcon(finalInfo, li) ? finalInfo : null;
                                     info.applyFrom(li.createShortcutIcon(pinnedShortcut,
                                             true /* badged */, fallbackIconProvider));
                                     li.recycle();
@@ -671,6 +663,11 @@ public class LoaderTask implements Runnable {
                                 appWidgetInfo.spanY = c.getInt(spanYIndex);
                                 appWidgetInfo.user = c.user;
 
+                                if (appWidgetInfo.spanX <= 0 || appWidgetInfo.spanY <= 0) {
+                                    c.markDeleted("Widget has invalid size: "
+                                            + appWidgetInfo.spanX + "x" + appWidgetInfo.spanY);
+                                    continue;
+                                }
                                 if (!c.isOnWorkspaceOrHotseat()) {
                                     c.markDeleted("Widget found where container != " +
                                             "CONTAINER_DESKTOP nor CONTAINER_HOTSEAT - ignoring!");
@@ -777,22 +774,6 @@ public class LoaderTask implements Runnable {
                         new IntentFilter(Intent.ACTION_BOOT_COMPLETED),
                         null,
                         new Handler(LauncherModel.getWorkerLooper()));
-            }
-
-            // Remove any empty screens
-            IntArray unusedScreens = mBgDataModel.workspaceScreens.clone();
-            for (ItemInfo item: mBgDataModel.itemsIdMap) {
-                int screenId = item.screenId;
-                if (item.container == LauncherSettings.Favorites.CONTAINER_DESKTOP &&
-                        unusedScreens.contains(screenId)) {
-                    unusedScreens.removeValue(screenId);
-                }
-            }
-
-            // If there are any empty screens remove them, and update.
-            if (unusedScreens.size() != 0) {
-                mBgDataModel.workspaceScreens.removeAllValues(unusedScreens);
-                LauncherModel.updateWorkspaceScreenOrder(context, mBgDataModel.workspaceScreens);
             }
         }
     }

@@ -18,9 +18,9 @@ package com.android.quickstep;
 import static android.content.pm.ActivityInfo.CONFIG_ORIENTATION;
 import static android.content.pm.ActivityInfo.CONFIG_SCREEN_SIZE;
 
-import static com.android.launcher3.LauncherAppTransitionManagerImpl.RECENTS_LAUNCH_DURATION;
-import static com.android.launcher3.LauncherAppTransitionManagerImpl.STATUS_BAR_TRANSITION_DURATION;
-import static com.android.launcher3.LauncherAppTransitionManagerImpl.STATUS_BAR_TRANSITION_PRE_DELAY;
+import static com.android.launcher3.QuickstepAppTransitionManagerImpl.RECENTS_LAUNCH_DURATION;
+import static com.android.launcher3.QuickstepAppTransitionManagerImpl.STATUS_BAR_TRANSITION_DURATION;
+import static com.android.launcher3.QuickstepAppTransitionManagerImpl.STATUS_BAR_TRANSITION_PRE_DELAY;
 import static com.android.quickstep.TaskUtils.getRecentsWindowAnimator;
 import static com.android.quickstep.TaskUtils.taskIsATargetWithMode;
 import static com.android.systemui.shared.system.RemoteAnimationTargetCompat.MODE_CLOSING;
@@ -40,11 +40,9 @@ import com.android.launcher3.AbstractFloatingView;
 import com.android.launcher3.BaseDraggingActivity;
 import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.InvariantDeviceProfile;
-import com.android.launcher3.ItemInfo;
 import com.android.launcher3.LauncherAnimationRunner;
 import com.android.launcher3.R;
 import com.android.launcher3.anim.Interpolators;
-import com.android.launcher3.badge.BadgeInfo;
 import com.android.launcher3.uioverrides.UiFactory;
 import com.android.launcher3.util.SystemUiController;
 import com.android.launcher3.util.Themes;
@@ -107,7 +105,7 @@ public class RecentsActivity extends BaseDraggingActivity {
     }
 
     public void onRootViewSizeChanged() {
-        if (isInMultiWindowModeCompat()) {
+        if (isInMultiWindowMode()) {
             onHandleConfigChanged();
         }
     }
@@ -134,7 +132,7 @@ public class RecentsActivity extends BaseDraggingActivity {
 
         // In case we are reusing IDP, create a copy so that we don't conflict with Launcher
         // activity.
-        mDeviceProfile = (mRecentsRootView != null) && isInMultiWindowModeCompat()
+        mDeviceProfile = (mRecentsRootView != null) && isInMultiWindowMode()
                 ? dp.getMultiWindowProfile(this, mRecentsRootView.getLastKnownSize())
                 : dp.copy(this);
         onDeviceProfileInitiated();
@@ -153,11 +151,6 @@ public class RecentsActivity extends BaseDraggingActivity {
     @Override
     public <T extends View> T getOverviewPanel() {
         return (T) mFallbackRecentsView;
-    }
-
-    @Override
-    public BadgeInfo getBadgeInfoForItem(ItemInfo info) {
-        return null;
     }
 
     @Override
@@ -189,7 +182,7 @@ public class RecentsActivity extends BaseDraggingActivity {
             RemoteAnimationTargetCompat[] targets) {
         AnimatorSet target = new AnimatorSet();
         boolean activityClosing = taskIsATargetWithMode(targets, getTaskId(), MODE_CLOSING);
-        ClipAnimationHelper helper = new ClipAnimationHelper();
+        ClipAnimationHelper helper = new ClipAnimationHelper(this);
         target.play(getRecentsWindowAnimator(taskView, !activityClosing, targets, helper)
                 .setDuration(RECENTS_LAUNCH_DURATION));
 
@@ -209,9 +202,6 @@ public class RecentsActivity extends BaseDraggingActivity {
         }
         return target;
     }
-
-    @Override
-    public void invalidateParent(ItemInfo info) { }
 
     @Override
     protected void onStart() {

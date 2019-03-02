@@ -17,6 +17,7 @@
 package com.android.launcher3;
 
 import static com.android.launcher3.util.SystemUiController.UI_STATE_OVERVIEW;
+
 import static java.lang.annotation.RetentionPolicy.SOURCE;
 
 import android.app.Activity;
@@ -25,7 +26,6 @@ import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.view.ContextThemeWrapper;
-import android.view.View.AccessibilityDelegate;
 
 import com.android.launcher3.DeviceProfile.OnDeviceProfileChangeListener;
 import com.android.launcher3.logging.StatsLogManager;
@@ -36,6 +36,7 @@ import com.android.launcher3.logging.UserEventDispatcher.UserEventDelegate;
 import com.android.launcher3.uioverrides.UiFactory;
 import com.android.launcher3.userevent.nano.LauncherLogProto;
 import com.android.launcher3.util.SystemUiController;
+import com.android.launcher3.views.ActivityContext;
 
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
@@ -44,7 +45,8 @@ import java.util.ArrayList;
 
 import androidx.annotation.IntDef;
 
-public abstract class BaseActivity extends Activity implements UserEventDelegate, LogStateProvider{
+public abstract class BaseActivity extends Activity
+        implements UserEventDelegate, LogStateProvider, ActivityContext {
 
     public static final int INVISIBLE_BY_STATE_HANDLER = 1 << 0;
     public static final int INVISIBLE_BY_APP_TRANSITIONS = 1 << 1;
@@ -100,12 +102,9 @@ public abstract class BaseActivity extends Activity implements UserEventDelegate
     // animation
     @InvisibilityFlags private int mForceInvisible;
 
+    @Override
     public DeviceProfile getDeviceProfile() {
         return mDeviceProfile;
-    }
-
-    public AccessibilityDelegate getAccessibilityDelegate() {
-        return null;
     }
 
     public int getCurrentState() { return StatsLogUtils.LAUNCHER_STATE_BACKGROUND; }
@@ -124,10 +123,6 @@ public abstract class BaseActivity extends Activity implements UserEventDelegate
             mUserEventDispatcher = UserEventDispatcher.newInstance(this, this);
         }
         return mUserEventDispatcher;
-    }
-
-    public boolean isInMultiWindowModeCompat() {
-        return Utilities.ATLEAST_NOUGAT && isInMultiWindowMode();
     }
 
     public SystemUiController getSystemUiController() {
@@ -227,7 +222,7 @@ public abstract class BaseActivity extends Activity implements UserEventDelegate
     /**
      * Used to set the override visibility state, used only to handle the transition home with the
      * recents animation.
-     * @see LauncherAppTransitionManagerImpl#getWallpaperOpenRunner()
+     * @see QuickstepAppTransitionManagerImpl#getWallpaperOpenRunner()
      */
     public void addForceInvisibleFlag(@InvisibilityFlags int flag) {
         mForceInvisible |= flag;

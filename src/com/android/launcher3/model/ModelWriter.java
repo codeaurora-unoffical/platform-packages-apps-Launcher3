@@ -109,11 +109,6 @@ public class ModelWriter {
     }
 
     private void checkItemInfoLocked(int itemId, ItemInfo item, StackTraceElement[] stackTrace) {
-        if (com.android.launcher3.Utilities.IS_RUNNING_IN_TEST_HARNESS
-                && com.android.launcher3.Utilities.IS_DEBUG_DEVICE) {
-            android.util.Log.d("b/117332845",
-                    "Checking item: " + android.util.Log.getStackTraceString(new Throwable()));
-        }
         ItemInfo modelItem = mBgDataModel.itemsIdMap.get(itemId);
         if (modelItem != null && item != modelItem) {
             // check all the data is consistent
@@ -333,7 +328,7 @@ public class ModelWriter {
      * {@link #commitDelete()} is called (or abandoned if {@link #abortDelete()} is called).
      * Otherwise, we run the Runnable immediately.
      */
-    public void enqueueDeleteRunnable(Runnable r) {
+    private void enqueueDeleteRunnable(Runnable r) {
         if (mPreparingToUndo) {
             mDeleteRunnables.add(r);
         } else {
@@ -349,12 +344,12 @@ public class ModelWriter {
         mDeleteRunnables.clear();
     }
 
-    public void abortDelete() {
+    public void abortDelete(int pageToBindFirst) {
         mPreparingToUndo = false;
         mDeleteRunnables.clear();
         // We do a full reload here instead of just a rebind because Folders change their internal
         // state when dragging an item out, which clobbers the rebind unless we load from the DB.
-        mModel.forceReload();
+        mModel.forceReload(pageToBindFirst);
     }
 
     private class UpdateItemRunnable extends UpdateItemBaseRunnable {
@@ -363,11 +358,6 @@ public class ModelWriter {
         private final int mItemId;
 
         UpdateItemRunnable(ItemInfo item, ContentWriter writer) {
-            if (com.android.launcher3.Utilities.IS_RUNNING_IN_TEST_HARNESS
-                    && com.android.launcher3.Utilities.IS_DEBUG_DEVICE) {
-                android.util.Log.d("b/117332845",
-                        android.util.Log.getStackTraceString(new Throwable()));
-            }
             mItem = item;
             mWriter = writer;
             mItemId = item.id;

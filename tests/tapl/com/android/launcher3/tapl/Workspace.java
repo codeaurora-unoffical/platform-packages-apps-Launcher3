@@ -46,28 +46,16 @@ public final class Workspace extends Home {
     @NonNull
     public AllApps switchToAllApps() {
         verifyActiveContainer();
-        if (mLauncher.isSwipeUpEnabled()) {
-            int midX = mLauncher.getDevice().getDisplayWidth() / 2;
-            int height = mLauncher.getDevice().getDisplayHeight();
-            // Swipe from 6/7ths down the screen to 1/7th down the screen.
-            mLauncher.swipe(
-                    midX,
-                    height * 6 / 7,
-                    midX,
-                    height / 7
-            );
-        } else {
-            // Swipe from the hotseat to near the top, e.g. 10% of the screen.
-            final UiObject2 hotseat = mHotseat;
-            final Point start = hotseat.getVisibleCenter();
-            final int endY = (int) (mLauncher.getDevice().getDisplayHeight() * 0.1f);
-            mLauncher.swipe(
-                    start.x,
-                    start.y,
-                    start.x,
-                    endY
-            );
-        }
+        // Swipe from the hotseat to near the top, e.g. 10% of the screen.
+        final UiObject2 hotseat = mHotseat;
+        final Point start = hotseat.getVisibleCenter();
+        final int endY = (int) (mLauncher.getDevice().getDisplayHeight() * 0.1f);
+        mLauncher.swipe(
+                start.x,
+                start.y,
+                start.x,
+                endY
+        );
 
         return new AllApps(mLauncher);
     }
@@ -81,7 +69,7 @@ public final class Workspace extends Home {
     @Nullable
     public AppIcon tryGetWorkspaceAppIcon(String appName) {
         final UiObject2 workspace = verifyActiveContainer();
-        final UiObject2 icon = workspace.findObject(AppIcon.getAppIconSelector(appName));
+        final UiObject2 icon = workspace.findObject(AppIcon.getAppIconSelector(appName, mLauncher));
         return icon != null ? new AppIcon(mLauncher, icon) : null;
     }
 
@@ -97,7 +85,7 @@ public final class Workspace extends Home {
         return new AppIcon(mLauncher,
                 mLauncher.getObjectInContainer(
                         verifyActiveContainer(),
-                        AppIcon.getAppIconSelector(appName)));
+                        AppIcon.getAppIconSelector(appName, mLauncher)));
     }
 
     /**
@@ -120,7 +108,7 @@ public final class Workspace extends Home {
     @NonNull
     private AppIcon getHotseatAppIcon(String appName) {
         return new AppIcon(mLauncher, mLauncher.getObjectInContainer(
-                mHotseat, AppIcon.getAppIconSelector(appName)));
+                mHotseat, AppIcon.getAppIconSelector(appName, mLauncher)));
     }
 
     private void dragIconToNextScreen(AppIcon app, UiObject2 workspace) {

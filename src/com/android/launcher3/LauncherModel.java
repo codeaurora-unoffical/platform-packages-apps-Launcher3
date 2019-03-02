@@ -20,12 +20,8 @@ import static com.android.launcher3.LauncherAppState.ACTION_FORCE_ROLOAD;
 import static com.android.launcher3.config.FeatureFlags.IS_DOGFOOD_BUILD;
 
 import android.content.BroadcastReceiver;
-import android.content.ContentProviderOperation;
-import android.content.ContentResolver;
-import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
-import android.net.Uri;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
@@ -38,8 +34,8 @@ import android.util.Pair;
 import com.android.launcher3.compat.LauncherAppsCompat;
 import com.android.launcher3.compat.PackageInstallerCompat.PackageInstallInfo;
 import com.android.launcher3.compat.UserManagerCompat;
-import com.android.launcher3.icons.LauncherIcons;
 import com.android.launcher3.icons.IconCache;
+import com.android.launcher3.icons.LauncherIcons;
 import com.android.launcher3.model.AddWorkspaceItemsTask;
 import com.android.launcher3.model.BaseModelUpdateTask;
 import com.android.launcher3.model.BgDataModel;
@@ -51,7 +47,6 @@ import com.android.launcher3.model.PackageInstallStateChangedTask;
 import com.android.launcher3.model.PackageUpdatedTask;
 import com.android.launcher3.model.ShortcutsChangedTask;
 import com.android.launcher3.model.UserLockStateChangedTask;
-import com.android.launcher3.provider.LauncherDbUtils;
 import com.android.launcher3.shortcuts.DeepShortcutManager;
 import com.android.launcher3.shortcuts.ShortcutInfoCompat;
 import com.android.launcher3.util.ComponentKey;
@@ -59,7 +54,6 @@ import com.android.launcher3.util.IntArray;
 import com.android.launcher3.util.ItemInfoMatcher;
 import com.android.launcher3.util.PackageUserKey;
 import com.android.launcher3.util.Preconditions;
-import com.android.launcher3.util.Provider;
 import com.android.launcher3.util.Thunk;
 import com.android.launcher3.util.ViewOnDrawExecutor;
 import com.android.launcher3.widget.WidgetListRowEntry;
@@ -70,10 +64,10 @@ import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.Executor;
+import java.util.function.Supplier;
 
 import androidx.annotation.Nullable;
 
@@ -96,10 +90,12 @@ public class LauncherModel extends BroadcastReceiver
     @Thunk boolean mIsLoaderTaskRunning;
 
     @Thunk static final HandlerThread sWorkerThread = new HandlerThread("launcher-loader");
+    private static final Looper mWorkerLooper;
     static {
         sWorkerThread.start();
+        mWorkerLooper = sWorkerThread.getLooper();
     }
-    @Thunk static final Handler sWorker = new Handler(sWorkerThread.getLooper());
+    @Thunk static final Handler sWorker = new Handler(mWorkerLooper);
 
     // Indicates whether the current model data is valid or not.
     // We start off with everything not loaded. After that, we assume that
@@ -146,7 +142,7 @@ public class LauncherModel extends BroadcastReceiver
         public void bindItems(List<ItemInfo> shortcuts, boolean forceAnimateIcons);
         public void bindScreens(IntArray orderedScreenIds);
         public void finishFirstPageBind(ViewOnDrawExecutor executor);
-        public void finishBindingItems(int currentScreen);
+        public void finishBindingItems(int pageBoundFirst);
         public void bindAllApplications(ArrayList<AppInfo> apps);
         public void bindAppsAddedOrUpdated(ArrayList<AppInfo> apps);
         public void preAddApps();
@@ -212,11 +208,6 @@ public class LauncherModel extends BroadcastReceiver
 
     static void checkItemInfoLocked(
             final int itemId, final ItemInfo item, StackTraceElement[] stackTrace) {
-        if (com.android.launcher3.Utilities.IS_RUNNING_IN_TEST_HARNESS
-                && com.android.launcher3.Utilities.IS_DEBUG_DEVICE) {
-            android.util.Log.d("b/117332845",
-                    "Checking item: " + android.util.Log.getStackTraceString(new Throwable()));
-        }
         ItemInfo modelItem = sBgDataModel.itemsIdMap.get(itemId);
         if (modelItem != null && item != modelItem) {
             // check all the data is consistent
@@ -260,53 +251,6 @@ public class LauncherModel extends BroadcastReceiver
             public void run() {
                 synchronized (sBgDataModel) {
                     checkItemInfoLocked(itemId, item, stackTrace);
-                }
-            }
-        };
-        runOnWorkerThread(r);
-    }
-
-    /**
-     * Update the order of the workspace screens in the database. The array list contains
-     * a list of screen ids in the order that they should appear.
-     */
-    public static void updateWorkspaceScreenOrder(Context context, IntArray screens) {
-        final ContentResolver cr = context.getContentResolver();
-        final Uri uri = LauncherSettings.WorkspaceScreens.CONTENT_URI;
-
-        // Create a copy with only non-negative values
-        final IntArray screensCopy = new IntArray();
-        for (int i = 0; i < screens.size(); i++) {
-            int id = screens.get(i);
-            if (id >= 0) {
-                screensCopy.add(id);
-            }
-        }
-
-        Runnable r = new Runnable() {
-            @Override
-            public void run() {
-                ArrayList<ContentProviderOperation> ops = new ArrayList<ContentProviderOperation>();
-                // Clear the table
-                ops.add(ContentProviderOperation.newDelete(uri).build());
-                int count = screensCopy.size();
-                for (int i = 0; i < count; i++) {
-                    ContentValues v = new ContentValues();
-                    int screenId = screensCopy.get(i);
-                    v.put(LauncherSettings.WorkspaceScreens._ID, screenId);
-                    v.put(LauncherSettings.WorkspaceScreens.SCREEN_RANK, i);
-                    ops.add(ContentProviderOperation.newInsert(uri).withValues(v).build());
-                }
-
-                try {
-                    cr.applyBatch(LauncherProvider.AUTHORITY, ops);
-                } catch (Exception ex) {
-                    throw new RuntimeException(ex);
-                }
-
-                synchronized (sBgDataModel) {
-                    sBgDataModel.workspaceScreens.clear();
-                    sBgDataModel.workspaceScreens.addAll(screensCopy);
                 }
             }
         };
@@ -423,11 +367,16 @@ public class LauncherModel extends BroadcastReceiver
         }
     }
 
+    public void forceReload() {
+        forceReload(-1);
+    }
+
     /**
      * Reloads the workspace items from the DB and re-binds the workspace. This should generally
      * not be called as DB updates are automatically followed by UI update
+     * @param synchronousBindPage The page to bind first. Can pass -1 to use the current page.
      */
-    public void forceReload() {
+    public void forceReload(int synchronousBindPage) {
         synchronized (mLock) {
             // Stop any existing loaders first, so they don't set mModelLoaded to true later
             stopLoader();
@@ -438,7 +387,10 @@ public class LauncherModel extends BroadcastReceiver
         // the next time launcher starts
         Callbacks callbacks = getCallback();
         if (callbacks != null) {
-            startLoader(callbacks.getCurrentWorkspaceScreen());
+            if (synchronousBindPage < 0) {
+                synchronousBindPage = callbacks.getCurrentWorkspaceScreen();
+            }
+            startLoader(synchronousBindPage);
         }
     }
 
@@ -451,11 +403,6 @@ public class LauncherModel extends BroadcastReceiver
      * @return true if the page could be bound synchronously.
      */
     public boolean startLoader(int synchronousBindPage) {
-        if (com.android.launcher3.Utilities.IS_RUNNING_IN_TEST_HARNESS
-                && com.android.launcher3.Utilities.IS_DEBUG_DEVICE) {
-            android.util.Log.d("b/117332845",
-                    android.util.Log.getStackTraceString(new Throwable()));
-        }
         // Enable queue before starting loader. It will get disabled in Launcher#finishBindingItems
         InstallShortcutReceiver.enableInstallQueue(InstallShortcutReceiver.FLAG_LOADER_RUNNING);
         synchronized (mLock) {
@@ -517,18 +464,6 @@ public class LauncherModel extends BroadcastReceiver
         }
     }
 
-    /**
-     * Loads the workspace screen ids in an ordered list.
-     */
-    public static IntArray loadWorkspaceScreensDb(Context context) {
-        final ContentResolver contentResolver = context.getContentResolver();
-        final Uri screensUri = LauncherSettings.WorkspaceScreens.CONTENT_URI;
-
-        // Get screens ordered by rank.
-        return LauncherDbUtils.getScreenIdsFromCursor(contentResolver.query(
-                screensUri, null, null, null, LauncherSettings.WorkspaceScreens.SCREEN_RANK));
-    }
-
     public void onInstallSessionCreated(final PackageInstallInfo sessionInfo) {
         enqueueModelUpdateTask(new BaseModelUpdateTask() {
             @Override
@@ -567,11 +502,6 @@ public class LauncherModel extends BroadcastReceiver
             synchronized (mLock) {
                 // Everything loaded bind the data.
                 mModelLoaded = true;
-                if (com.android.launcher3.Utilities.IS_RUNNING_IN_TEST_HARNESS
-                        && com.android.launcher3.Utilities.IS_DEBUG_DEVICE) {
-                    android.util.Log.d("b/117332845",
-                            android.util.Log.getStackTraceString(new Throwable()));
-                }
             }
         }
 
@@ -597,10 +527,8 @@ public class LauncherModel extends BroadcastReceiver
      * use partial updates similar to {@link UserManagerCompat}
      */
     public void refreshShortcutsIfRequired() {
-        if (Utilities.ATLEAST_NOUGAT_MR1) {
-            sWorker.removeCallbacks(mShortcutPermissionCheckRunnable);
-            sWorker.post(mShortcutPermissionCheckRunnable);
-        }
+        sWorker.removeCallbacks(mShortcutPermissionCheckRunnable);
+        sWorker.post(mShortcutPermissionCheckRunnable);
     }
 
     /**
@@ -666,7 +594,7 @@ public class LauncherModel extends BroadcastReceiver
     /**
      * Utility method to update a shortcut on the background thread.
      */
-    public void updateAndBindShortcutInfo(final Provider<ShortcutInfo> shortcutProvider) {
+    public void updateAndBindShortcutInfo(final Supplier<ShortcutInfo> shortcutProvider) {
         enqueueModelUpdateTask(new BaseModelUpdateTask() {
             @Override
             public void execute(LauncherAppState app, BgDataModel dataModel, AllAppsList apps) {
@@ -708,7 +636,7 @@ public class LauncherModel extends BroadcastReceiver
      * @return the looper for the worker thread which can be used to start background tasks.
      */
     public static Looper getWorkerLooper() {
-        return sWorkerThread.getLooper();
+        return mWorkerLooper;
     }
 
     public static void setWorkerPriority(final int priority) {
