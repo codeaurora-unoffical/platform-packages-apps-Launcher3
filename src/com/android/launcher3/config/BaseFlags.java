@@ -88,18 +88,15 @@ abstract class BaseFlags {
     // trying to make them fit the orientation the device is in.
     public static final boolean OVERVIEW_USE_SCREENSHOT_ORIENTATION = true;
 
-    public static final ToggleableGlobalSettingsFlag QUICK_SWITCH
-            = new ToggleableGlobalSettingsFlag("QUICK_SWITCH", false,
-            "Swiping right on the nav bar while in an app switches to the previous app");
+    public static final ToggleableGlobalSettingsFlag STYLE_WALLPAPER
+            = new ToggleableGlobalSettingsFlag("STYLE_WALLPAPER", false,
+            "Direct users to the new ThemePicker based WallpaperPicker");
 
     /**
      * Feature flag to handle define config changes dynamically instead of killing the process.
      */
     public static final TogglableFlag APPLY_CONFIG_AT_RUNTIME = new TogglableFlag(
             "APPLY_CONFIG_AT_RUNTIME", true, "Apply display changes dynamically");
-
-    public static final TogglableFlag ENABLE_TASK_STABILIZER = new TogglableFlag(
-            "ENABLE_TASK_STABILIZER", false, "Stable task list across fast task switches");
 
     public static final TogglableFlag QUICKSTEP_SPRINGS = new TogglableFlag("QUICKSTEP_SPRINGS",
             false, "Enable springs for quickstep animations");
@@ -110,6 +107,10 @@ abstract class BaseFlags {
     public static final ToggleableGlobalSettingsFlag SWIPE_HOME
             = new ToggleableGlobalSettingsFlag("SWIPE_HOME", false,
             "Swiping up on the nav bar goes home. Swipe and hold goes to recent apps.");
+
+    public static final TogglableFlag ENABLE_HINTS_IN_OVERVIEW = new TogglableFlag(
+            "ENABLE_HINTS_IN_OVERVIEW", false,
+            "Show chip hints and gleams on the overview screen");
 
     public static void initialize(Context context) {
         // Avoid the disk read for user builds
