@@ -206,57 +206,6 @@ public class LauncherModel extends BroadcastReceiver
                 hasVerticalHotseat, verifyChanges);
     }
 
-    static void checkItemInfoLocked(
-            final int itemId, final ItemInfo item, StackTraceElement[] stackTrace) {
-        ItemInfo modelItem = sBgDataModel.itemsIdMap.get(itemId);
-        if (modelItem != null && item != modelItem) {
-            // check all the data is consistent
-            if (modelItem instanceof ShortcutInfo && item instanceof ShortcutInfo) {
-                ShortcutInfo modelShortcut = (ShortcutInfo) modelItem;
-                ShortcutInfo shortcut = (ShortcutInfo) item;
-                if (modelShortcut.title.toString().equals(shortcut.title.toString()) &&
-                        modelShortcut.intent.filterEquals(shortcut.intent) &&
-                        modelShortcut.id == shortcut.id &&
-                        modelShortcut.itemType == shortcut.itemType &&
-                        modelShortcut.container == shortcut.container &&
-                        modelShortcut.screenId == shortcut.screenId &&
-                        modelShortcut.cellX == shortcut.cellX &&
-                        modelShortcut.cellY == shortcut.cellY &&
-                        modelShortcut.spanX == shortcut.spanX &&
-                        modelShortcut.spanY == shortcut.spanY) {
-                    // For all intents and purposes, this is the same object
-                    return;
-                }
-            }
-
-            // the modelItem needs to match up perfectly with item if our model is
-            // to be consistent with the database-- for now, just require
-            // modelItem == item or the equality check above
-            String msg = "item: " + ((item != null) ? item.toString() : "null") +
-                    "modelItem: " +
-                    ((modelItem != null) ? modelItem.toString() : "null") +
-                    "Error: ItemInfo passed to checkItemInfo doesn't match original";
-            RuntimeException e = new RuntimeException(msg);
-            if (stackTrace != null) {
-                e.setStackTrace(stackTrace);
-            }
-            throw e;
-        }
-    }
-
-    static void checkItemInfo(final ItemInfo item) {
-        final StackTraceElement[] stackTrace = new Throwable().getStackTrace();
-        final int itemId = item.id;
-        Runnable r = new Runnable() {
-            public void run() {
-                synchronized (sBgDataModel) {
-                    checkItemInfoLocked(itemId, item, stackTrace);
-                }
-            }
-        };
-        runOnWorkerThread(r);
-    }
-
     /**
      * Set this as the current Launcher activity object for the loader.
      */
