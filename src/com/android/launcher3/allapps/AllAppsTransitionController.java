@@ -124,12 +124,6 @@ public class AllAppsTransitionController implements StateHandler, OnDeviceProfil
         float shiftCurrent = progress * mShiftRange;
 
         mAppsView.setTranslationY(shiftCurrent);
-        float hotseatTranslation = -mShiftRange + shiftCurrent;
-
-        if (!mIsVerticalLayout) {
-            mLauncher.getHotseat().setTranslationY(hotseatTranslation);
-            mLauncher.getWorkspace().getPageIndicator().setTranslationY(hotseatTranslation);
-        }
 
         // Use a light system UI (dark icons) if all apps is behind at least half of the
         // status bar.
@@ -194,9 +188,12 @@ public class AllAppsTransitionController implements StateHandler, OnDeviceProfil
 
     private void setAlphas(LauncherState toState, AnimationConfig config,
             AnimatorSetBuilder builder) {
+        setAlphas(toState.getVisibleElements(mLauncher), config, builder);
+    }
+
+    public void setAlphas(int visibleElements, AnimationConfig config, AnimatorSetBuilder builder) {
         PropertySetter setter = config == null ? NO_ANIM_PROPERTY_SETTER
                 : config.getPropertySetter(builder);
-        int visibleElements = toState.getVisibleElements(mLauncher);
         boolean hasHeaderExtra = (visibleElements & ALL_APPS_HEADER_EXTRA) != 0;
         boolean hasContent = (visibleElements & ALL_APPS_CONTENT) != 0;
 
@@ -208,7 +205,7 @@ public class AllAppsTransitionController implements StateHandler, OnDeviceProfil
         mAppsView.getSearchUiManager().setContentVisibility(visibleElements, setter, allAppsFade);
 
         setter.setInt(mScrimView, ScrimView.DRAG_HANDLE_ALPHA,
-                (visibleElements & VERTICAL_SWIPE_INDICATOR) != 0 ? 255 : 0, LINEAR);
+                (visibleElements & VERTICAL_SWIPE_INDICATOR) != 0 ? 255 : 0, allAppsFade);
     }
 
     public AnimatorListenerAdapter getProgressAnimatorListener() {

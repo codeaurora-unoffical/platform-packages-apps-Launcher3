@@ -149,6 +149,11 @@ public class ClipAnimationHelper {
     }
 
     public RectF applyTransform(RemoteAnimationTargetSet targetSet, TransformParams params) {
+        return applyTransform(targetSet, params, true /* launcherOnTop */);
+    }
+
+    public RectF applyTransform(RemoteAnimationTargetSet targetSet, TransformParams params,
+            boolean launcherOnTop) {
         if (params.currentRect == null) {
             RectF currentRect;
             mTmpRectF.set(mTargetRect);
@@ -185,10 +190,11 @@ public class ClipAnimationHelper {
                     if (mSupportsRoundedCornersOnWindows) {
                         cornerRadius = Utilities.mapRange(params.progress, mWindowCornerRadius,
                                 mTaskCornerRadius);
+                        mCurrentCornerRadius = cornerRadius;
                     }
                 }
                 alpha = mTaskAlphaCallback.apply(app, params.targetAlpha);
-            } else if (ENABLE_QUICKSTEP_LIVE_TILE.get()) {
+            } else if (ENABLE_QUICKSTEP_LIVE_TILE.get() && launcherOnTop) {
                 crop = null;
                 layer = Integer.MAX_VALUE;
             }

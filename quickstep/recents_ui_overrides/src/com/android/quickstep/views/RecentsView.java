@@ -22,13 +22,14 @@ import static com.android.launcher3.anim.Interpolators.ACCEL;
 import static com.android.launcher3.anim.Interpolators.ACCEL_2;
 import static com.android.launcher3.anim.Interpolators.FAST_OUT_SLOW_IN;
 import static com.android.launcher3.anim.Interpolators.LINEAR;
-import static com.android.launcher3.config.FeatureFlags.QUICKSTEP_SPRINGS;
 import static com.android.launcher3.config.FeatureFlags.ENABLE_QUICKSTEP_LIVE_TILE;
-import static com.android.launcher3.uioverrides.TaskViewTouchController.SUCCESS_TRANSITION_PROGRESS;
-import static com.android.quickstep.util.ClipAnimationHelper.TransformParams;
+import static com.android.launcher3.config.FeatureFlags.QUICKSTEP_SPRINGS;
+import static com.android.launcher3.uioverrides.touchcontrollers.TaskViewTouchController.SUCCESS_TRANSITION_PROGRESS;
 import static com.android.launcher3.util.SystemUiController.UI_STATE_OVERVIEW;
 import static com.android.quickstep.TaskUtils.checkCurrentOrManagedUserId;
-import static com.android.quickstep.TouchInteractionService.EDGE_NAV_BAR;
+import static com.android.launcher3.Utilities.EDGE_NAV_BAR;
+import static com.android.quickstep.util.ClipAnimationHelper.TransformParams;
+
 import android.animation.Animator;
 import android.animation.AnimatorSet;
 import android.animation.LayoutTransition;
@@ -81,6 +82,7 @@ import com.android.launcher3.anim.AnimatorPlaybackController;
 import com.android.launcher3.anim.PropertyListBuilder;
 import com.android.launcher3.anim.SpringObjectAnimator;
 import com.android.launcher3.config.FeatureFlags;
+import com.android.launcher3.userevent.nano.LauncherLogProto;
 import com.android.launcher3.userevent.nano.LauncherLogProto.Action.Direction;
 import com.android.launcher3.userevent.nano.LauncherLogProto.Action.Touch;
 import com.android.launcher3.util.OverScroller;
@@ -90,19 +92,19 @@ import com.android.launcher3.util.ViewPool;
 import com.android.quickstep.OverviewCallbacks;
 import com.android.quickstep.RecentsAnimationWrapper;
 import com.android.quickstep.RecentsModel;
+import com.android.quickstep.RecentsModel.TaskThumbnailChangeListener;
 import com.android.quickstep.TaskThumbnailCache;
 import com.android.quickstep.TaskUtils;
 import com.android.quickstep.util.ClipAnimationHelper;
-import com.android.quickstep.util.SwipeAnimationTargetSet;
 import com.android.quickstep.util.TaskViewDrawable;
 import com.android.systemui.shared.recents.model.Task;
 import com.android.systemui.shared.recents.model.ThumbnailData;
 import com.android.systemui.shared.system.ActivityManagerWrapper;
 import com.android.systemui.shared.system.BackgroundExecutor;
+import com.android.systemui.shared.system.LauncherEventUtil;
 import com.android.systemui.shared.system.PackageManagerWrapper;
 import com.android.systemui.shared.system.SyncRtSurfaceTransactionApplierCompat;
 import com.android.systemui.shared.system.TaskStackChangeListener;
-import com.android.systemui.shared.system.WindowCallbacksCompat;
 
 import java.util.ArrayList;
 import java.util.function.Consumer;
@@ -113,7 +115,7 @@ import java.util.function.Consumer;
 @TargetApi(Build.VERSION_CODES.P)
 public abstract class RecentsView<T extends BaseActivity> extends PagedView implements Insettable,
         TaskThumbnailCache.HighResLoadingState.HighResLoadingStateChangedCallback,
-        InvariantDeviceProfile.OnIDPChangeListener {
+        InvariantDeviceProfile.OnIDPChangeListener, TaskThumbnailChangeListener {
 
     private static final String TAG = RecentsView.class.getSimpleName();
 
@@ -166,18 +168,12 @@ public abstract class RecentsView<T extends BaseActivity> extends PagedView impl
 
     private final ViewPool<TaskView> mTaskViewPool;
 
+    private boolean mDwbToastShown;
+
     /**
      * TODO: Call reloadIdNeeded in onTaskStackChanged.
      */
     private final TaskStackChangeListener mTaskStackListener = new TaskStackChangeListener() {
-        @Override
-        public void onTaskSnapshotChanged(int taskId, ThumbnailData snapshot) {
-            if (!mHandleTaskStackChanges) {
-                return;
-            }
-            updateThumbnail(taskId, snapshot);
-        }
-
         @Override
         public void onActivityPinned(String packageName, int userId, int taskId, int stackId) {
             if (!mHandleTaskStackChanges) {
@@ -262,7 +258,6 @@ public abstract class RecentsView<T extends BaseActivity> extends PagedView impl
 
     private boolean mOverviewStateEnabled;
     private boolean mHandleTaskStackChanges;
-    private Runnable mNextPageSwitchRunnable;
     private boolean mSwipeDownShouldLaunchApp;
     private boolean mTouchDownToStartHome;
     private final int mTouchSlop;
@@ -286,6 +281,7 @@ public abstract class RecentsView<T extends BaseActivity> extends PagedView impl
     private final int mEmptyMessagePadding;
     private boolean mShowEmptyMessage;
     private Layout mEmptyTextLayout;
+    private LiveTileOverlay mLiveTileOverlay;
 
     private BaseActivity.MultiWindowModeChangedListener mMultiWindowModeChangedListener =
             (inMultiWindowMode) -> {
@@ -340,6 +336,19 @@ public abstract class RecentsView<T extends BaseActivity> extends PagedView impl
         return mIsRtl;
     }
 
+    @Override
+    public Task onTaskThumbnailChanged(int taskId, ThumbnailData thumbnailData) {
+        if (mHandleTaskStackChanges) {
+            TaskView taskView = getTaskView(taskId);
+            if (taskView != null) {
+                Task task = taskView.getTask();
+                taskView.getThumbnail().setThumbnail(task, thumbnailData);
+                return task;
+            }
+        }
+        return null;
+    }
+
     public TaskView updateThumbnail(int taskId, ThumbnailData thumbnailData) {
         TaskView taskView = getTaskView(taskId);
         if (taskView != null) {
@@ -371,6 +380,7 @@ public abstract class RecentsView<T extends BaseActivity> extends PagedView impl
         mActivity.addMultiWindowModeChangedListener(mMultiWindowModeChangedListener);
         ActivityManagerWrapper.getInstance().registerTaskStackListener(mTaskStackListener);
         mSyncTransactionApplier = new SyncRtSurfaceTransactionApplierCompat(this);
+        RecentsModel.INSTANCE.get(getContext()).addThumbnailChangeListener(this);
         mIdp.addOnChangeListener(this);
     }
 
@@ -382,6 +392,7 @@ public abstract class RecentsView<T extends BaseActivity> extends PagedView impl
         mActivity.removeMultiWindowModeChangedListener(mMultiWindowModeChangedListener);
         ActivityManagerWrapper.getInstance().unregisterTaskStackListener(mTaskStackListener);
         mSyncTransactionApplier = null;
+        RecentsModel.INSTANCE.get(getContext()).removeThumbnailChangeListener(this);
         mIdp.removeOnChangeListener(this);
     }
 
@@ -419,19 +430,21 @@ public abstract class RecentsView<T extends BaseActivity> extends PagedView impl
     public void setOverviewStateEnabled(boolean enabled) {
         mOverviewStateEnabled = enabled;
         updateTaskStackListenerState();
+        if (!enabled) mDwbToastShown = false;
     }
 
-    public void setNextPageSwitchRunnable(Runnable r) {
-        mNextPageSwitchRunnable = r;
+    public void onDigitalWellbeingToastShown() {
+        if (!mDwbToastShown) {
+            mDwbToastShown = true;
+            mActivity.getUserEventDispatcher().logActionTip(
+                    LauncherEventUtil.VISIBLE,
+                    LauncherLogProto.TipType.DWB_TOAST);
+        }
     }
 
     @Override
     protected void onPageEndTransition() {
         super.onPageEndTransition();
-        if (mNextPageSwitchRunnable != null) {
-            mNextPageSwitchRunnable.run();
-            mNextPageSwitchRunnable = null;
-        }
         if (getNextPage() > 0) {
             setSwipeDownShouldLaunchApp(true);
         }
@@ -774,7 +787,7 @@ public abstract class RecentsView<T extends BaseActivity> extends PagedView impl
         setCurrentTask(runningTaskId);
     }
 
-    public TaskView getRunningTaskView() {
+    public @Nullable TaskView getRunningTaskView() {
         return getTaskView(mRunningTaskId);
     }
 
@@ -856,10 +869,15 @@ public abstract class RecentsView<T extends BaseActivity> extends PagedView impl
     }
 
     public void animateUpRunningTaskIconScale() {
+        animateUpRunningTaskIconScale(0);
+    }
+
+    public void animateUpRunningTaskIconScale(float startProgress) {
         mRunningTaskIconScaledDown = false;
         TaskView firstTask = getRunningTaskView();
         if (firstTask != null) {
             firstTask.animateIconScaleAndDimIntoView();
+            firstTask.setIconScaleAnimStartProgress(startProgress);
         }
     }
 
@@ -1568,6 +1586,16 @@ public abstract class RecentsView<T extends BaseActivity> extends PagedView impl
         mClipAnimationHelper = clipAnimationHelper;
     }
 
+    public void setLiveTileOverlay(LiveTileOverlay liveTileOverlay) {
+        mLiveTileOverlay = liveTileOverlay;
+    }
+
+    public void updateLiveTileIcon(Drawable icon) {
+        if (mLiveTileOverlay != null) {
+            mLiveTileOverlay.setIcon(icon);
+        }
+    }
+
     public void finishRecentsAnimation(boolean toRecents, Runnable onFinishComplete) {
         if (mRecentsAnimationWrapper == null) {
             if (onFinishComplete != null) {
@@ -1577,51 +1605,5 @@ public abstract class RecentsView<T extends BaseActivity> extends PagedView impl
         }
 
         mRecentsAnimationWrapper.finish(toRecents, onFinishComplete);
-    }
-
-    public void takeScreenshotAndFinishRecentsAnimation(boolean toRecents,
-            Runnable onFinishComplete) {
-        if (mRecentsAnimationWrapper == null || getRunningTaskView() == null) {
-            if (onFinishComplete != null) {
-                onFinishComplete.run();
-            }
-            return;
-        }
-
-        SwipeAnimationTargetSet controller = mRecentsAnimationWrapper.getController();
-        if (controller != null) {
-            // Update the screenshot of the task
-            ThumbnailData taskSnapshot = controller.screenshotTask(mRunningTaskId);
-            TaskView taskView = updateThumbnail(mRunningTaskId, taskSnapshot);
-            if (taskView != null) {
-                taskView.setShowScreenshot(true);
-                // Defer finishing the animation until the next launcher frame with the
-                // new thumbnail
-                new WindowCallbacksCompat(taskView) {
-
-                    // The number of frames to defer until we actually finish the animation
-                    private int mDeferFrameCount = 2;
-
-                    @Override
-                    public void onPostDraw(Canvas canvas) {
-                        if (mDeferFrameCount > 0) {
-                            mDeferFrameCount--;
-                            // Workaround, detach and reattach to invalidate the root node for
-                            // another draw
-                            detach();
-                            attach();
-                            taskView.invalidate();
-                            return;
-                        }
-
-                        detach();
-                        mRecentsAnimationWrapper.finish(toRecents, () -> {
-                            onFinishComplete.run();
-                            mRunningTaskId = -1;
-                        });
-                    }
-                }.attach();
-            }
-        }
     }
 }

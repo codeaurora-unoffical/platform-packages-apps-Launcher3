@@ -18,6 +18,7 @@ package com.android.quickstep.views;
 
 import static android.widget.Toast.LENGTH_SHORT;
 import static com.android.launcher3.BaseActivity.fromContext;
+import static com.android.launcher3.QuickstepAppTransitionManagerImpl.RECENTS_LAUNCH_DURATION;
 import static com.android.launcher3.anim.Interpolators.FAST_OUT_SLOW_IN;
 import static com.android.launcher3.anim.Interpolators.LINEAR;
 import static com.android.launcher3.config.FeatureFlags.ENABLE_QUICKSTEP_LIVE_TILE;
@@ -28,7 +29,6 @@ import android.animation.ObjectAnimator;
 import android.animation.TimeInterpolator;
 import android.app.ActivityOptions;
 import android.content.Context;
-import android.content.Intent;
 import android.content.res.Resources;
 import android.graphics.Outline;
 import android.graphics.drawable.Drawable;
@@ -91,7 +91,6 @@ public class TaskView extends FrameLayout implements PageCallbacks, Reusable {
 
     public static final long SCALE_ICON_DURATION = 120;
     private static final long DIM_ANIM_DURATION = 700;
-    private static final long TASK_LAUNCH_ANIM_DURATION = 200;
 
     public static final Property<TaskView, Float> ZOOM_SCALE =
             new FloatProperty<TaskView>("zoomScale") {
@@ -156,7 +155,8 @@ public class TaskView extends FrameLayout implements PageCallbacks, Reusable {
     private float mZoomScale;
     private float mFullscreenProgress;
 
-    private Animator mIconAndDimAnimator;
+    private ObjectAnimator mIconAndDimAnimator;
+    private float mIconScaleAnimStartProgress = 0;
     private float mFocusTransitionProgress = 1;
 
     private boolean mShowScreenshot;
@@ -214,6 +214,7 @@ public class TaskView extends FrameLayout implements PageCallbacks, Reusable {
      * Updates this task view to the given {@param task}.
      */
     public void bind(Task task) {
+        cancelPendingLoadTasks();
         mTask = task;
         mSnapshotView.bind(task);
     }
@@ -236,10 +237,10 @@ public class TaskView extends FrameLayout implements PageCallbacks, Reusable {
 
     public AnimatorPlaybackController createLaunchAnimationForRunningTask() {
         final PendingAnimation pendingAnimation =
-                getRecentsView().createTaskLauncherAnimation(this, TASK_LAUNCH_ANIM_DURATION);
-        pendingAnimation.anim.setInterpolator(Interpolators.ZOOM_IN);
+                getRecentsView().createTaskLauncherAnimation(this, RECENTS_LAUNCH_DURATION);
+        pendingAnimation.anim.setInterpolator(Interpolators.TOUCH_RESPONSE_INTERPOLATOR);
         AnimatorPlaybackController currentAnimation = AnimatorPlaybackController
-                .wrap(pendingAnimation.anim, TASK_LAUNCH_ANIM_DURATION, null);
+                .wrap(pendingAnimation.anim, RECENTS_LAUNCH_DURATION, null);
         currentAnimation.setEndAction(() -> {
             pendingAnimation.finish(true, Touch.SWIPE);
             launchTask(false);
@@ -248,7 +249,11 @@ public class TaskView extends FrameLayout implements PageCallbacks, Reusable {
     }
 
     public void launchTask(boolean animate) {
-        launchTask(animate, (result) -> {
+        launchTask(animate, false /* freezeTaskList */);
+    }
+
+    public void launchTask(boolean animate, boolean freezeTaskList) {
+        launchTask(animate, freezeTaskList, (result) -> {
             if (!result) {
                 notifyTaskLaunchFailed(TAG);
             }
@@ -257,26 +262,33 @@ public class TaskView extends FrameLayout implements PageCallbacks, Reusable {
 
     public void launchTask(boolean animate, Consumer<Boolean> resultCallback,
             Handler resultCallbackHandler) {
+        launchTask(animate, false /* freezeTaskList */, resultCallback, resultCallbackHandler);
+    }
+
+    public void launchTask(boolean animate, boolean freezeTaskList, Consumer<Boolean> resultCallback,
+            Handler resultCallbackHandler) {
         if (ENABLE_QUICKSTEP_LIVE_TILE.get()) {
             if (isRunningTask()) {
-                getRecentsView().finishRecentsAnimation(false,
+                getRecentsView().finishRecentsAnimation(false /* toRecents */,
                         () -> resultCallbackHandler.post(() -> resultCallback.accept(true)));
             } else {
-                getRecentsView().takeScreenshotAndFinishRecentsAnimation(true,
-                        () -> launchTaskInternal(animate, resultCallback, resultCallbackHandler));
+                launchTaskInternal(animate, freezeTaskList, resultCallback, resultCallbackHandler);
             }
         } else {
-            launchTaskInternal(animate, resultCallback, resultCallbackHandler);
+            launchTaskInternal(animate, freezeTaskList, resultCallback, resultCallbackHandler);
         }
     }
 
-    private void launchTaskInternal(boolean animate, Consumer<Boolean> resultCallback,
-            Handler resultCallbackHandler) {
+    private void launchTaskInternal(boolean animate, boolean freezeTaskList,
+            Consumer<Boolean> resultCallback, Handler resultCallbackHandler) {
         if (mTask != null) {
             final ActivityOptions opts;
             if (animate) {
                 opts = ((BaseDraggingActivity) fromContext(getContext()))
                         .getActivityLaunchOptions(this);
+                if (freezeTaskList) {
+                    ActivityOptionsCompat.setFreezeRecentTasksList(opts);
+                }
                 ActivityManagerWrapper.getInstance().startActivityFromRecentsAsync(mTask.key,
                         opts, resultCallback, resultCallbackHandler);
             } else {
@@ -287,6 +299,9 @@ public class TaskView extends FrameLayout implements PageCallbacks, Reusable {
                         resultCallbackHandler.post(() -> resultCallback.accept(true));
                     }
                 }, resultCallbackHandler);
+                if (freezeTaskList) {
+                    ActivityOptionsCompat.setFreezeRecentTasksList(opts);
+                }
                 ActivityManagerWrapper.getInstance().startActivityFromRecentsAsync(mTask.key,
                         opts, (success) -> {
                             if (resultCallback != null && !success) {
@@ -304,34 +319,44 @@ public class TaskView extends FrameLayout implements PageCallbacks, Reusable {
         if (mTask == null) {
             return;
         }
+        cancelPendingLoadTasks();
         if (visible) {
             // These calls are no-ops if the data is already loaded, try and load the high
             // resolution thumbnail if the state permits
             RecentsModel model = RecentsModel.INSTANCE.get(getContext());
             TaskThumbnailCache thumbnailCache = model.getThumbnailCache();
             TaskIconCache iconCache = model.getIconCache();
-            mThumbnailLoadRequest = thumbnailCache.updateThumbnailInBackground(mTask,
-                    !thumbnailCache.getHighResLoadingState().isEnabled() /* reducedResolution */,
-                    (task) -> mSnapshotView.setThumbnail(task, task.thumbnail));
+            mThumbnailLoadRequest = thumbnailCache.updateThumbnailInBackground(
+                    mTask, thumbnail -> mSnapshotView.setThumbnail(mTask, thumbnail));
             mIconLoadRequest = iconCache.updateIconInBackground(mTask,
                     (task) -> {
                         setIcon(task.icon);
+                        if (isRunningTask()) {
+                            getRecentsView().updateLiveTileIcon(task.icon);
+                        }
                         mDigitalWellBeingToast.initialize(
                                 mTask,
-                                (saturation, contentDescription) -> {
+                                contentDescription -> {
                                     setContentDescription(contentDescription);
-                                    mSnapshotView.setSaturation(saturation);
+                                    if (mDigitalWellBeingToast.getVisibility() == VISIBLE) {
+                                        getRecentsView().onDigitalWellbeingToastShown();
+                                    }
                                 });
                     });
         } else {
-            if (mThumbnailLoadRequest != null) {
-                mThumbnailLoadRequest.cancel();
-            }
-            if (mIconLoadRequest != null) {
-                mIconLoadRequest.cancel();
-            }
             mSnapshotView.setThumbnail(null, null);
             setIcon(null);
+        }
+    }
+
+    private void cancelPendingLoadTasks() {
+        if (mThumbnailLoadRequest != null) {
+            mThumbnailLoadRequest.cancel();
+            mThumbnailLoadRequest = null;
+        }
+        if (mIconLoadRequest != null) {
+            mIconLoadRequest.cancel();
+            mIconLoadRequest = null;
         }
     }
 
@@ -374,11 +399,16 @@ public class TaskView extends FrameLayout implements PageCallbacks, Reusable {
         mIconView.setScaleY(scale);
     }
 
+    public void setIconScaleAnimStartProgress(float startProgress) {
+        mIconScaleAnimStartProgress = startProgress;
+    }
+
     public void animateIconScaleAndDimIntoView() {
         if (mIconAndDimAnimator != null) {
             mIconAndDimAnimator.cancel();
         }
         mIconAndDimAnimator = ObjectAnimator.ofFloat(this, FOCUS_TRANSITION, 1);
+        mIconAndDimAnimator.setCurrentFraction(mIconScaleAnimStartProgress);
         mIconAndDimAnimator.setDuration(DIM_ANIM_DURATION).setInterpolator(LINEAR);
         mIconAndDimAnimator.addListener(new AnimatorListenerAdapter() {
             @Override
@@ -401,6 +431,7 @@ public class TaskView extends FrameLayout implements PageCallbacks, Reusable {
     }
 
     private void resetViewTransforms() {
+        setCurveScale(1);
         setZoomScale(1);
         setTranslationX(0f);
         setTranslationY(0f);
