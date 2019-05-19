@@ -34,7 +34,8 @@ import android.content.SharedPreferences;
 import android.os.SystemClock;
 import android.util.Log;
 import android.view.View;
-import android.view.ViewParent;
+
+import androidx.annotation.Nullable;
 
 import com.android.launcher3.DropTarget;
 import com.android.launcher3.ItemInfo;
@@ -54,15 +55,12 @@ import com.android.launcher3.util.ResourceBasedOverride;
 import java.util.Locale;
 import java.util.UUID;
 
-import androidx.annotation.Nullable;
-
 /**
  * Manages the creation of {@link LauncherEvent}.
  * To debug this class, execute following command before side loading a new apk.
  *
  * $ adb shell setprop log.tag.UserEvent VERBOSE
  */
-@Deprecated
 public class UserEventDispatcher implements ResourceBasedOverride {
 
     private static final String TAG = "UserEvent";
@@ -98,7 +96,6 @@ public class UserEventDispatcher implements ResourceBasedOverride {
      * Fills in the container data on the given event if the given view is not null.
      * @return whether container data was added.
      */
-    @Deprecated
     public static boolean fillInLogContainerData(LauncherLogProto.LauncherEvent event, @Nullable View v) {
         // Fill in grid(x,y), pageIndex of the child and container type of the parent
         LogContainerProvider provider = StatsLogUtils.getLaunchProviderRecursive(v);
@@ -295,7 +292,7 @@ public class UserEventDispatcher implements ResourceBasedOverride {
      * (1) WORKSPACE: if the launcher is the foreground activity
      * (2) APP: if another app was the foreground activity
      */
-    public void logStateChangeAction(int action, int dir, int srcChildTargetType,
+    public void logStateChangeAction(int action, int dir, int downX, int downY, int srcChildTargetType,
                                      int srcParentContainerType, int dstContainerType,
                                      int pageIndex) {
         LauncherEvent event;
@@ -313,6 +310,8 @@ public class UserEventDispatcher implements ResourceBasedOverride {
         event.action.dir = dir;
         event.action.isStateChange = true;
         event.srcTarget[0].pageIndex = pageIndex;
+        event.srcTarget[0].spanX = downX;
+        event.srcTarget[0].spanY = downY;
         dispatchUserEvent(event, null);
         resetElapsedContainerMillis("state changed");
     }
@@ -327,7 +326,7 @@ public class UserEventDispatcher implements ResourceBasedOverride {
 
     public void logDeepShortcutsOpen(View icon) {
         LogContainerProvider provider = StatsLogUtils.getLaunchProviderRecursive(icon);
-        if (icon == null || !(icon.getTag() instanceof ItemInfo)) {
+        if (icon == null || !(icon.getTag() instanceof ItemInfo || provider == null)) {
             return;
         }
         ItemInfo info = (ItemInfo) icon.getTag();
@@ -357,6 +356,27 @@ public class UserEventDispatcher implements ResourceBasedOverride {
 
         }
         event.actionDurationMillis = SystemClock.uptimeMillis() - mActionDurationMillis;
+        dispatchUserEvent(event, null);
+    }
+
+    public void logActionBack(boolean completed, int downX, int downY, boolean isButton,
+            boolean gestureSwipeLeft, int containerType) {
+        int actionTouch = isButton ? Action.Touch.TAP : Action.Touch.SWIPE;
+        Action action = newCommandAction(actionTouch);
+        action.command = Action.Command.BACK;
+        action.dir = isButton
+                ? Action.Direction.NONE
+                : gestureSwipeLeft
+                        ? Action.Direction.LEFT
+                        : Action.Direction.RIGHT;
+        Target target = newControlTarget(isButton
+                ? LauncherLogProto.ControlType.BACK_BUTTON
+                : LauncherLogProto.ControlType.BACK_GESTURE);
+        target.spanX = downX;
+        target.spanY = downY;
+        target.cardinality = completed ? 1 : 0;
+        LauncherEvent event = newLauncherEvent(action, target, newContainerTarget(containerType));
+
         dispatchUserEvent(event, null);
     }
 

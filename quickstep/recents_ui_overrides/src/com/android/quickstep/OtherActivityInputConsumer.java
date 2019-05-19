@@ -21,10 +21,10 @@ import static android.view.MotionEvent.ACTION_MOVE;
 import static android.view.MotionEvent.ACTION_POINTER_UP;
 import static android.view.MotionEvent.ACTION_UP;
 import static android.view.MotionEvent.INVALID_POINTER_ID;
-
+import static com.android.launcher3.Utilities.EDGE_NAV_BAR;
 import static com.android.launcher3.util.RaceConditionTracker.ENTER;
 import static com.android.launcher3.util.RaceConditionTracker.EXIT;
-import static com.android.quickstep.TouchInteractionService.EDGE_NAV_BAR;
+import static com.android.quickstep.SysUINavigationMode.Mode.NO_BUTTON;
 import static com.android.quickstep.TouchInteractionService.TOUCH_INTERACTION_LOG;
 import static com.android.systemui.shared.system.ActivityManagerWrapper.CLOSE_SYSTEM_WINDOWS_REASON_RECENTS;
 
@@ -36,6 +36,8 @@ import android.content.Intent;
 import android.graphics.PointF;
 import android.graphics.Rect;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Display;
 import android.view.MotionEvent;
 import android.view.Surface;
@@ -45,10 +47,11 @@ import android.view.WindowManager;
 
 import androidx.annotation.UiThread;
 
-import com.android.launcher3.config.FeatureFlags;
+import com.android.launcher3.R;
 import com.android.launcher3.util.Preconditions;
 import com.android.launcher3.util.RaceConditionTracker;
 import com.android.launcher3.util.TraceHelper;
+import com.android.quickstep.SysUINavigationMode.Mode;
 import com.android.quickstep.WindowTransformSwipeHandler.GestureEndTarget;
 import com.android.quickstep.util.CachedEventDispatcher;
 import com.android.quickstep.util.MotionPauseDetector;
@@ -56,7 +59,8 @@ import com.android.quickstep.util.RecentsAnimationListenerSet;
 import com.android.systemui.shared.system.ActivityManagerWrapper;
 import com.android.systemui.shared.system.BackgroundExecutor;
 import com.android.systemui.shared.system.InputConsumerController;
-import com.android.systemui.shared.system.NavigationBarCompat;
+import com.android.systemui.shared.system.InputMonitorCompat;
+import com.android.systemui.shared.system.QuickStepContract;
 import com.android.systemui.shared.system.WindowManagerWrapper;
 
 import java.util.function.Consumer;
@@ -79,12 +83,15 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
     private final TaskOverlayFactory mTaskOverlayFactory;
     private final InputConsumerController mInputConsumer;
     private final SwipeSharedState mSwipeSharedState;
+    private final InputMonitorCompat mInputMonitorCompat;
+    private final SysUINavigationMode.Mode mMode;
 
     private final int mDisplayRotation;
     private final Rect mStableInsets = new Rect();
 
     private final Consumer<OtherActivityInputConsumer> mOnCompleteCallback;
     private final MotionPauseDetector mMotionPauseDetector;
+    private final float mMotionPauseMinDisplacement;
     private VelocityTracker mVelocityTracker;
 
     private WindowTransformSwipeHandler mInteractionHandler;
@@ -102,27 +109,40 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
     // Slop used to determine when we say that the gesture has started.
     private boolean mPassedTouchSlop;
 
-    // TODO: Start displacement should have both x and y
+    // Might be displacement in X or Y, depending on the direction we are swiping from the nav bar.
     private float mStartDisplacement;
+    private float mStartDisplacementX;
+
+    private Handler mMainThreadHandler;
+    private Runnable mCancelRecentsAnimationRunnable = () -> {
+        ActivityManagerWrapper.getInstance().cancelRecentsAnimation(
+                true /* restoreHomeStackPosition */);
+    };
 
     public OtherActivityInputConsumer(Context base, RunningTaskInfo runningTaskInfo,
             RecentsModel recentsModel, Intent homeIntent, ActivityControlHelper activityControl,
             boolean isDeferredDownTarget, OverviewCallbacks overviewCallbacks,
             TaskOverlayFactory taskOverlayFactory, InputConsumerController inputConsumer,
             Consumer<OtherActivityInputConsumer> onCompleteCallback,
-            SwipeSharedState swipeSharedState) {
+            SwipeSharedState swipeSharedState, InputMonitorCompat inputMonitorCompat) {
         super(base);
 
+        mMainThreadHandler = new Handler(Looper.getMainLooper());
         mRunningTask = runningTaskInfo;
         mRecentsModel = recentsModel;
         mHomeIntent = homeIntent;
+        mMode = SysUINavigationMode.getMode(base);
 
         mMotionPauseDetector = new MotionPauseDetector(base);
+        mMotionPauseMinDisplacement = base.getResources().getDimension(
+                R.dimen.motion_pause_detector_min_displacement_from_app);
         mOnCompleteCallback = onCompleteCallback;
         mVelocityTracker = VelocityTracker.obtain();
+        mInputMonitorCompat = inputMonitorCompat;
 
         mActivityControlHelper = activityControl;
-        mIsDeferredDownTarget = isDeferredDownTarget;
+        boolean continuingPreviousGesture = swipeSharedState.getActiveListener() != null;
+        mIsDeferredDownTarget = !continuingPreviousGesture && isDeferredDownTarget;
         mOverviewCallbacks = overviewCallbacks;
         mTaskOverlayFactory = taskOverlayFactory;
         mInputConsumer = inputConsumer;
@@ -132,10 +152,15 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
         mDisplayRotation = display.getRotation();
         WindowManagerWrapper.getInstance().getStableInsets(mStableInsets);
 
-        mDragSlop = NavigationBarCompat.getQuickStepDragSlopPx();
-        mTouchSlop = NavigationBarCompat.getQuickStepTouchSlopPx();
-        // If active listener isn't null, we are continuing the previous gesture.
-        mPassedTouchSlop = mPassedDragSlop = mSwipeSharedState.getActiveListener() != null;
+        mDragSlop = QuickStepContract.getQuickStepDragSlopPx();
+        mTouchSlop = QuickStepContract.getQuickStepTouchSlopPx();
+
+        mPassedTouchSlop = mPassedDragSlop = continuingPreviousGesture;
+    }
+
+    @Override
+    public int getType() {
+        return TYPE_OTHER_ACTIVITY;
     }
 
     @Override
@@ -199,6 +224,7 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
                 }
                 mLastPos.set(ev.getX(pointerIndex), ev.getY(pointerIndex));
                 float displacement = getDisplacement(ev);
+                float displacementX = mLastPos.x - mDownPos.x;
 
                 if (!mPassedDragSlop) {
                     if (!mIsDeferredDownTarget) {
@@ -207,16 +233,15 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
                         if (Math.abs(displacement) > mDragSlop) {
                             mPassedDragSlop = true;
                             mStartDisplacement = displacement;
+                            mStartDisplacementX = displacementX;
                         }
                     }
                 }
 
                 if (!mPassedTouchSlop) {
-                    if (Math.hypot(mLastPos.x - mDownPos.x, mLastPos.y - mDownPos.y) >=
-                            mTouchSlop) {
+                    if (Math.hypot(displacementX, mLastPos.y - mDownPos.y) >= mTouchSlop) {
                         mPassedTouchSlop = true;
 
-                        TOUCH_INTERACTION_LOG.startQuickStep();
                         if (mIsDeferredDownTarget) {
                             // Deferred gesture, start the animation and gesture tracking once
                             // we pass the actual touch slop
@@ -225,6 +250,7 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
                         if (!mPassedDragSlop) {
                             mPassedDragSlop = true;
                             mStartDisplacement = displacement;
+                            mStartDisplacementX = displacementX;
                         }
                         notifyGestureStarted();
                     }
@@ -234,12 +260,14 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
                     // Move
                     mInteractionHandler.updateDisplacement(displacement - mStartDisplacement);
 
-                    if (FeatureFlags.SWIPE_HOME.get()) {
-                        boolean isLandscape = isNavBarOnLeft() || isNavBarOnRight();
-                        float orthogonalDisplacement = !isLandscape
-                                ? ev.getX() - mDownPos.x
-                                : ev.getY() - mDownPos.y;
-                        mMotionPauseDetector.addPosition(displacement, orthogonalDisplacement);
+                    if (mMode == Mode.NO_BUTTON) {
+                        float horizontalDist = Math.abs(displacementX - mStartDisplacementX);
+                        float upDist = -(displacement - mStartDisplacement);
+                        boolean isLikelyToStartNewTask = horizontalDist > upDist;
+                        mMotionPauseDetector.setDisallowPause(upDist < mMotionPauseMinDisplacement
+                                || isLikelyToStartNewTask);
+                        mMotionPauseDetector.addPosition(displacement, ev.getEventTime());
+                        mInteractionHandler.setIsLikelyToStartNewTask(isLikelyToStartNewTask);
                     }
                 }
                 break;
@@ -258,9 +286,11 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
     }
 
     private void notifyGestureStarted() {
+        TOUCH_INTERACTION_LOG.addLog("startQuickstep");
         if (mInteractionHandler == null) {
             return;
         }
+        mInputMonitorCompat.pilferPointers();
 
         mOverviewCallbacks.closeAllWindows();
         ActivityManagerWrapper.getInstance().closeSystemWindows(
@@ -271,15 +301,17 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
     }
 
     private boolean isNavBarOnRight() {
-        return mDisplayRotation == Surface.ROTATION_90 && mStableInsets.right > 0;
+        return SysUINavigationMode.INSTANCE.get(getBaseContext()).getMode() != NO_BUTTON
+                && mDisplayRotation == Surface.ROTATION_90 && mStableInsets.right > 0;
     }
 
     private boolean isNavBarOnLeft() {
-        return mDisplayRotation == Surface.ROTATION_270 && mStableInsets.left > 0;
+        return SysUINavigationMode.INSTANCE.get(getBaseContext()).getMode() != NO_BUTTON
+                && mDisplayRotation == Surface.ROTATION_270 && mStableInsets.left > 0;
     }
 
     private void startTouchTrackingForWindowAnimation(long touchTimeMs) {
-        TOUCH_INTERACTION_LOG.startRecentsAnimation();
+        TOUCH_INTERACTION_LOG.addLog("startRecentsAnimation");
 
         RecentsAnimationListenerSet listenerSet = mSwipeSharedState.getActiveListener();
         final WindowTransformSwipeHandler handler = new WindowTransformSwipeHandler(
@@ -296,6 +328,7 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
         if (listenerSet != null) {
             listenerSet.addListener(handler);
             mSwipeSharedState.applyActiveRecentsAnimationState(handler);
+            notifyGestureStarted();
         } else {
             RecentsAnimationListenerSet newListenerSet =
                     mSwipeSharedState.newRecentsAnimationListenerSet();
@@ -316,22 +349,26 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
             mVelocityTracker.computeCurrentVelocity(1000,
                     ViewConfiguration.get(this).getScaledMaximumFlingVelocity());
             float velocityX = mVelocityTracker.getXVelocity(mActivePointerId);
+            float velocityY = mVelocityTracker.getYVelocity(mActivePointerId);
             float velocity = isNavBarOnRight() ? velocityX
                     : isNavBarOnLeft() ? -velocityX
-                            : mVelocityTracker.getYVelocity(mActivePointerId);
+                            : velocityY;
 
             mInteractionHandler.updateDisplacement(getDisplacement(ev) - mStartDisplacement);
-            mInteractionHandler.onGestureEnded(velocity, velocityX);
+            mInteractionHandler.onGestureEnded(velocity, new PointF(velocityX, velocityY),
+                    mDownPos);
         } else {
             // Since we start touch tracking on DOWN, we may reach this state without actually
             // starting the gesture. In that case, just cleanup immediately.
             onConsumerAboutToBeSwitched();
             onInteractionGestureFinished();
 
-            // Also clean up in case the system has handled the UP and canceled the animation before
-            // we had a chance to start the recents animation. In such a case, we will not receive
-            ActivityManagerWrapper.getInstance().cancelRecentsAnimation(
-                    true /* restoreHomeStackPosition */);
+            // Cancel the recents animation if SysUI happens to handle UP before we have a chance
+            // to start the recents animation. In addition, workaround for b/126336729 by delaying
+            // the cancel of the animation for a period, in case SysUI is slow to handle UP and we
+            // handle DOWN & UP and move the home stack before SysUI can start the activity
+            mMainThreadHandler.removeCallbacks(mCancelRecentsAnimationRunnable);
+            mMainThreadHandler.postDelayed(mCancelRecentsAnimationRunnable, 100);
         }
         mVelocityTracker.recycle();
         mVelocityTracker = null;
@@ -341,6 +378,7 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
     @Override
     public void onConsumerAboutToBeSwitched() {
         Preconditions.assertUIThread();
+        mMainThreadHandler.removeCallbacks(mCancelRecentsAnimationRunnable);
         if (mInteractionHandler != null) {
             // The consumer is being switched while we are active. Set up the shared state to be
             // used by the next animation
@@ -384,7 +422,7 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
     }
 
     @Override
-    public boolean isActive() {
+    public boolean useSharedSwipeState() {
         return mInteractionHandler != null;
     }
 }

@@ -15,11 +15,6 @@
  */
 package com.android.quickstep;
 
-import static com.android.quickstep.SwipeUpSetting.newSwipeUpSettingsObserver;
-import static com.android.systemui.shared.system.NavigationBarCompat.FLAG_DISABLE_QUICK_SCRUB;
-import static com.android.systemui.shared.system.NavigationBarCompat.FLAG_DISABLE_SWIPE_UP;
-import static com.android.systemui.shared.system.NavigationBarCompat.FLAG_SHOW_OVERVIEW_BUTTON;
-
 import android.content.Context;
 import android.os.Handler;
 import android.os.Message;
@@ -29,20 +24,13 @@ import android.util.Log;
 import com.android.launcher3.Utilities;
 import com.android.launcher3.allapps.DiscoveryBounce;
 import com.android.launcher3.util.MainThreadInitializedObject;
-import com.android.launcher3.util.SecureSettingsObserver;
 import com.android.launcher3.util.UiThreadHelper;
 import com.android.systemui.shared.recents.ISystemUiProxy;
 
 import androidx.annotation.WorkerThread;
 
 /**
- * Sets overview interaction flags, such as:
- *
- *   - FLAG_DISABLE_QUICK_SCRUB
- *   - FLAG_DISABLE_SWIPE_UP
- *   - FLAG_SHOW_OVERVIEW_BUTTON
- *
- * @see com.android.systemui.shared.system.NavigationBarCompat.InteractionType and associated flags.
+ * Sets alpha for the back button
  */
 public class OverviewInteractionState {
 
@@ -52,13 +40,10 @@ public class OverviewInteractionState {
 
     // We do not need any synchronization for this variable as its only written on UI thread.
     public static final MainThreadInitializedObject<OverviewInteractionState> INSTANCE =
-            new MainThreadInitializedObject<>((c) -> new OverviewInteractionState(c));
+            new MainThreadInitializedObject<>(OverviewInteractionState::new);
 
     private static final int MSG_SET_PROXY = 200;
     private static final int MSG_SET_BACK_BUTTON_ALPHA = 201;
-    private static final int MSG_SET_SWIPE_UP_ENABLED = 202;
-
-    private final SecureSettingsObserver mSwipeUpSettingObserver;
 
     private final Context mContext;
     private final Handler mUiHandler;
@@ -66,10 +51,7 @@ public class OverviewInteractionState {
 
     // These are updated on the background thread
     private ISystemUiProxy mISystemUiProxy;
-    private boolean mSwipeUpEnabled = true;
     private float mBackButtonAlpha = 1;
-
-    private Runnable mOnSwipeUpSettingChangedListener;
 
     private OverviewInteractionState(Context context) {
         mContext = context;
@@ -80,20 +62,8 @@ public class OverviewInteractionState {
         mUiHandler = new Handler(this::handleUiMessage);
         mBgHandler = new Handler(UiThreadHelper.getBackgroundLooper(), this::handleBgMessage);
 
-        if (SwipeUpSetting.isSwipeUpSettingAvailable()) {
-            mSwipeUpSettingObserver =
-                    newSwipeUpSettingsObserver(context, this::notifySwipeUpSettingChanged);
-            mSwipeUpSettingObserver.register();
-            mSwipeUpEnabled = mSwipeUpSettingObserver.getValue();
-            resetHomeBounceSeenOnQuickstepEnabledFirstTime();
-        } else {
-            mSwipeUpSettingObserver = null;
-            mSwipeUpEnabled = SwipeUpSetting.isSwipeUpEnabledDefaultValue();
-        }
-    }
-
-    public boolean isSwipeUpGestureEnabled() {
-        return mSwipeUpEnabled;
+        onNavigationModeChanged(SysUINavigationMode.INSTANCE.get(context)
+                .addModeChangeListener(this::onNavigationModeChanged));
     }
 
     public float getBackButtonAlpha() {
@@ -101,7 +71,7 @@ public class OverviewInteractionState {
     }
 
     public void setBackButtonAlpha(float alpha, boolean animate) {
-        if (!mSwipeUpEnabled) {
+        if (!modeSupportsGestures()) {
             alpha = 1;
         }
         mUiHandler.removeMessages(MSG_SET_BACK_BUTTON_ALPHA);
@@ -129,38 +99,8 @@ public class OverviewInteractionState {
             case MSG_SET_BACK_BUTTON_ALPHA:
                 applyBackButtonAlpha((float) msg.obj, msg.arg1 == 1);
                 return true;
-            case MSG_SET_SWIPE_UP_ENABLED:
-                mSwipeUpEnabled = msg.arg1 != 0;
-                resetHomeBounceSeenOnQuickstepEnabledFirstTime();
-
-                if (mOnSwipeUpSettingChangedListener != null) {
-                    mOnSwipeUpSettingChangedListener.run();
-                }
-                break;
         }
-        applyFlags();
         return true;
-    }
-
-    public void setOnSwipeUpSettingChangedListener(Runnable listener) {
-        mOnSwipeUpSettingChangedListener = listener;
-    }
-
-    @WorkerThread
-    private void applyFlags() {
-        if (mISystemUiProxy == null) {
-            return;
-        }
-
-        int flags = FLAG_DISABLE_QUICK_SCRUB;
-        if (!mSwipeUpEnabled) {
-            flags = FLAG_DISABLE_SWIPE_UP | FLAG_DISABLE_QUICK_SCRUB | FLAG_SHOW_OVERVIEW_BUTTON;
-        }
-        try {
-            mISystemUiProxy.setInteractionState(flags);
-        } catch (RemoteException e) {
-            Log.w(TAG, "Unable to update overview interaction flags", e);
-        }
     }
 
     @WorkerThread
@@ -175,19 +115,21 @@ public class OverviewInteractionState {
         }
     }
 
-    public void notifySwipeUpSettingChanged(boolean swipeUpEnabled) {
-        mUiHandler.removeMessages(MSG_SET_SWIPE_UP_ENABLED);
-        mUiHandler.obtainMessage(MSG_SET_SWIPE_UP_ENABLED, swipeUpEnabled ? 1 : 0, 0).
-                sendToTarget();
+    private void onNavigationModeChanged(SysUINavigationMode.Mode mode) {
+        resetHomeBounceSeenOnQuickstepEnabledFirstTime();
     }
 
     private void resetHomeBounceSeenOnQuickstepEnabledFirstTime() {
-        if (mSwipeUpEnabled && !Utilities.getPrefs(mContext).getBoolean(
+        if (modeSupportsGestures() && !Utilities.getPrefs(mContext).getBoolean(
                 HAS_ENABLED_QUICKSTEP_ONCE, true)) {
             Utilities.getPrefs(mContext).edit()
-                    .putBoolean(HAS_ENABLED_QUICKSTEP_ONCE, true)
-                    .putBoolean(DiscoveryBounce.HOME_BOUNCE_SEEN, false)
-                    .apply();
+                .putBoolean(HAS_ENABLED_QUICKSTEP_ONCE, true)
+                .putBoolean(DiscoveryBounce.HOME_BOUNCE_SEEN, false)
+                .apply();
         }
+    }
+
+    private boolean modeSupportsGestures() {
+        return SysUINavigationMode.getMode(mContext).hasGestures;
     }
 }

@@ -8,11 +8,19 @@ import android.app.ActivityManager;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Insets;
 import android.graphics.Paint;
 import android.graphics.Rect;
+import android.graphics.RectF;
+import android.os.Build;
 import android.util.AttributeSet;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewDebug;
+import android.view.WindowInsets;
+
+import java.util.Collections;
+import java.util.List;
 
 public class LauncherRootView extends InsettableFrameLayout {
 
@@ -23,8 +31,17 @@ public class LauncherRootView extends InsettableFrameLayout {
     @ViewDebug.ExportedProperty(category = "launcher")
     private final Rect mConsumedInsets = new Rect();
 
+    @ViewDebug.ExportedProperty(category = "launcher")
+    private final RectF mTouchExcludeRegion = new RectF();
+
+    @ViewDebug.ExportedProperty(category = "launcher")
+    private static final List<Rect> SYSTEM_GESTURE_EXCLUSION_RECT =
+            Collections.singletonList(new Rect());
+
     private View mAlignedView;
     private WindowStateListener mWindowStateListener;
+    @ViewDebug.ExportedProperty(category = "launcher")
+    private boolean mDisallowBackGesture;
 
     public LauncherRootView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -145,10 +162,63 @@ public class LauncherRootView extends InsettableFrameLayout {
         }
     }
 
+    @Override
+    public WindowInsets dispatchApplyWindowInsets(WindowInsets insets) {
+        if (Utilities.ATLEAST_Q) {
+            Insets gestureInsets = insets.getMandatorySystemGestureInsets();
+            mTouchExcludeRegion.set(gestureInsets.left, gestureInsets.top,
+                    gestureInsets.right, gestureInsets.bottom);
+        }
+        return super.dispatchApplyWindowInsets(insets);
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (ev.getAction() == MotionEvent.ACTION_DOWN) {
+            float x = ev.getX();
+            float y = ev.getY();
+            if (y < mTouchExcludeRegion.top
+                    || x < mTouchExcludeRegion.left
+                    || x > (getWidth() - mTouchExcludeRegion.right)
+                    || y > (getHeight() - mTouchExcludeRegion.bottom)) {
+                return false;
+            }
+        }
+        return super.dispatchTouchEvent(ev);
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int l, int t, int r, int b) {
+        super.onLayout(changed, l, t, r, b);
+        SYSTEM_GESTURE_EXCLUSION_RECT.get(0).set(l, t, r, b);
+        setDisallowBackGesture(mDisallowBackGesture);
+    }
+
+    @TargetApi(Build.VERSION_CODES.Q)
+    public void setDisallowBackGesture(boolean disallowBackGesture) {
+        if (!Utilities.ATLEAST_Q) {
+            return;
+        }
+        mDisallowBackGesture = disallowBackGesture;
+        setSystemGestureExclusionRects(mDisallowBackGesture
+                ? SYSTEM_GESTURE_EXCLUSION_RECT
+                : Collections.emptyList());
+    }
+
     public interface WindowStateListener {
 
         void onWindowFocusChanged(boolean hasFocus);
 
         void onWindowVisibilityChanged(int visibility);
+    }
+
+    @Override
+    public void requestLayout() {
+        super.requestLayout();
+        if (com.android.launcher3.TestProtocol.sDebugTracing) {
+            android.util.Log.d(com.android.launcher3.TestProtocol.NO_DRAG_TAG,
+                    "requestLayout @ " + android.util.Log.getStackTraceString(
+                            new Throwable()));
+        }
     }
 }

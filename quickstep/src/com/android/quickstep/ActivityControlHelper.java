@@ -15,7 +15,6 @@
  */
 package com.android.quickstep;
 
-import android.animation.Animator;
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.Intent;
@@ -28,20 +27,19 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.animation.Interpolator;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.annotation.UiThread;
+
 import com.android.launcher3.BaseDraggingActivity;
 import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.anim.AnimatorPlaybackController;
-import com.android.launcher3.util.MultiValueAlpha.AlphaProperty;
 import com.android.quickstep.util.RemoteAnimationProvider;
 import com.android.quickstep.util.RemoteAnimationTargetSet;
 import com.android.systemui.shared.system.RemoteAnimationTargetCompat;
 
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
-
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
-import androidx.annotation.UiThread;
 
 /**
  * Utility class which abstracts out the logical differences between Launcher and RecentsActivity.
@@ -54,6 +52,8 @@ public interface ActivityControlHelper<T extends BaseDraggingActivity> {
     int getSwipeUpDestinationAndLength(DeviceProfile dp, Context context, Rect outRect);
 
     void onSwipeUpComplete(T activity);
+
+    void onAssistantVisibilityChanged(float visibility);
 
     @NonNull HomeAnimationFactory prepareHomeUI(T activity);
 
@@ -84,8 +84,6 @@ public interface ActivityControlHelper<T extends BaseDraggingActivity> {
     default boolean deferStartingActivity(Region activeNavBarRegion, MotionEvent ev) {
         return true;
     }
-
-    AlphaProperty getAlphaProperty(T activity);
 
     /**
      * Used for containerType in {@link com.android.launcher3.logging.UserEventDispatcher}
@@ -124,6 +122,13 @@ public interface ActivityControlHelper<T extends BaseDraggingActivity> {
 
         default void setShelfState(ShelfAnimState animState, Interpolator interpolator,
                 long duration) { }
+
+        /**
+         * @param attached Whether to show RecentsView alongside the app window. If false, recents
+         *                 will be hidden by some property we can animate, e.g. alpha.
+         * @param animate Whether to animate recents to/from its new attached state.
+         */
+        default void setRecentsAttachedToAppWindow(boolean attached, boolean animate) { }
     }
 
     interface HomeAnimationFactory {
@@ -135,6 +140,6 @@ public interface ActivityControlHelper<T extends BaseDraggingActivity> {
 
         @NonNull RectF getWindowTargetRect();
 
-        @NonNull Animator createActivityAnimationToHome();
+        @NonNull AnimatorPlaybackController createActivityAnimationToHome();
     }
 }

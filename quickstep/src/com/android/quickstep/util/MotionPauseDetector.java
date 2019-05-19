@@ -17,7 +17,6 @@ package com.android.quickstep.util;
 
 import android.content.Context;
 import android.content.res.Resources;
-import android.os.SystemClock;
 import android.view.MotionEvent;
 
 import com.android.launcher3.Alarm;
@@ -39,31 +38,26 @@ public class MotionPauseDetector {
     private final float mSpeedVerySlow;
     private final float mSpeedSomewhatFast;
     private final float mSpeedFast;
-    private final float mMinDisplacementForPause;
-    private final float mMaxOrthogonalDisplacementForPause;
     private final Alarm mForcePauseTimeout;
 
     private Long mPreviousTime = null;
     private Float mPreviousPosition = null;
     private Float mPreviousVelocity = null;
 
-    private TotalDisplacement mTotalDisplacement = new TotalDisplacement();
     private Float mFirstPosition = null;
-    private Float mFirstOrthogonalPosition = null;
 
     private OnMotionPauseListener mOnMotionPauseListener;
     private boolean mIsPaused;
     // Bias more for the first pause to make it feel extra responsive.
     private boolean mHasEverBeenPaused;
+    /** @see #setDisallowPause(boolean) */
+    private boolean mDisallowPause;
 
     public MotionPauseDetector(Context context) {
         Resources res = context.getResources();
         mSpeedVerySlow = res.getDimension(R.dimen.motion_pause_detector_speed_very_slow);
         mSpeedSomewhatFast = res.getDimension(R.dimen.motion_pause_detector_speed_somewhat_fast);
         mSpeedFast = res.getDimension(R.dimen.motion_pause_detector_speed_fast);
-        mMinDisplacementForPause = res.getDimension(R.dimen.motion_pause_detector_min_displacement);
-        mMaxOrthogonalDisplacementForPause = res.getDimension(
-                R.dimen.motion_pause_detector_max_orthogonal_displacement);
         mForcePauseTimeout = new Alarm();
         mForcePauseTimeout.setOnAlarmListener(alarm -> updatePaused(true /* isPaused */));
     }
@@ -74,45 +68,41 @@ public class MotionPauseDetector {
      */
     public void setOnMotionPauseListener(OnMotionPauseListener listener) {
         mOnMotionPauseListener = listener;
-        if (mOnMotionPauseListener != null) {
-            mOnMotionPauseListener.onMotionPauseChanged(mIsPaused);
-        }
-        mForcePauseTimeout.setAlarm(FORCE_PAUSE_TIMEOUT);
+    }
+
+    /**
+     * @param disallowPause If true, we will not detect any pauses until this is set to false again.
+     */
+    public void setDisallowPause(boolean disallowPause) {
+        mDisallowPause = disallowPause;
+        updatePaused(mIsPaused);
     }
 
     /**
      * Computes velocity and acceleration to determine whether the motion is paused.
      * @param position The x or y component of the motion being tracked.
-     * @param orthogonalPosition The x or y component (opposite of {@param position}) of the motion.
      *
      * TODO: Use historical positions as well, e.g. {@link MotionEvent#getHistoricalY(int, int)}.
      */
-    public void addPosition(float position, float orthogonalPosition) {
+    public void addPosition(float position, long time) {
         if (mFirstPosition == null) {
             mFirstPosition = position;
         }
-        if (mFirstOrthogonalPosition == null) {
-            mFirstOrthogonalPosition = orthogonalPosition;
-        }
-        long time = SystemClock.uptimeMillis();
+        mForcePauseTimeout.setAlarm(FORCE_PAUSE_TIMEOUT);
         if (mPreviousTime != null && mPreviousPosition != null) {
             long changeInTime = Math.max(1, time - mPreviousTime);
             float changeInPosition = position - mPreviousPosition;
             float velocity = changeInPosition / changeInTime;
             if (mPreviousVelocity != null) {
-                mTotalDisplacement.set(Math.abs(position - mFirstPosition),
-                        Math.abs(orthogonalPosition - mFirstOrthogonalPosition));
-                checkMotionPaused(velocity, mPreviousVelocity, mTotalDisplacement);
+                checkMotionPaused(velocity, mPreviousVelocity);
             }
             mPreviousVelocity = velocity;
         }
         mPreviousTime = time;
         mPreviousPosition = position;
-        mForcePauseTimeout.setAlarm(FORCE_PAUSE_TIMEOUT);
     }
 
-    private void checkMotionPaused(float velocity, float prevVelocity,
-            TotalDisplacement totalDisplacement) {
+    private void checkMotionPaused(float velocity, float prevVelocity) {
         float speed = Math.abs(velocity);
         float previousSpeed = Math.abs(prevVelocity);
         boolean isPaused;
@@ -134,14 +124,13 @@ public class MotionPauseDetector {
                 }
             }
         }
-        boolean passedMinDisplacement = totalDisplacement.primary >= mMinDisplacementForPause;
-        boolean passedMaxOrthogonalDisplacement =
-                totalDisplacement.orthogonal >= mMaxOrthogonalDisplacementForPause;
-        isPaused &= passedMinDisplacement && !passedMaxOrthogonalDisplacement;
         updatePaused(isPaused);
     }
 
     private void updatePaused(boolean isPaused) {
+        if (mDisallowPause) {
+            isPaused = false;
+        }
         if (mIsPaused != isPaused) {
             mIsPaused = isPaused;
             if (mIsPaused) {
@@ -158,8 +147,6 @@ public class MotionPauseDetector {
         mPreviousPosition = null;
         mPreviousVelocity = null;
         mFirstPosition = null;
-        mFirstOrthogonalPosition = null;
-        mTotalDisplacement.set(0, 0);
         setOnMotionPauseListener(null);
         mIsPaused = mHasEverBeenPaused = false;
         mForcePauseTimeout.cancelAlarm();
@@ -171,19 +158,5 @@ public class MotionPauseDetector {
 
     public interface OnMotionPauseListener {
         void onMotionPauseChanged(boolean isPaused);
-    }
-
-    /**
-     * Contains the displacement from the first tracked position,
-     * along both the primary and orthogonal axes.
-     */
-    private class TotalDisplacement {
-        public float primary;
-        public float orthogonal;
-
-        public void set(float primaryDisplacement, float orthogonalDisplacement) {
-            this.primary = primaryDisplacement;
-            this.orthogonal = orthogonalDisplacement;
-        }
     }
 }

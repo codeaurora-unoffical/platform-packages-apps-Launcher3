@@ -71,6 +71,7 @@ enum ItemType {
   NOTIFICATION = 8;
   TASK = 9;         // Each page of Recents UI (QuickStep)
   WEB_APP = 10;
+  TASK_ICON = 11;
 }
 
 // Used to define what type of container a Target would represent.
@@ -106,7 +107,7 @@ enum ControlType {
   RESIZE_HANDLE = 8;
   VERTICAL_SCROLL = 9;
   HOME_INTENT = 10; // Deprecated, use enum Command instead
-  BACK_BUTTON = 11; // Deprecated, use enum Command instead
+  BACK_BUTTON = 11;
   QUICK_SCRUB_BUTTON = 12;
   CLEAR_ALL_BUTTON = 13;
   CANCEL_TARGET = 14;
@@ -114,6 +115,8 @@ enum ControlType {
   SPLIT_SCREEN_TARGET = 16;
   REMOTE_ACTION_SHORTCUT = 17;
   APP_USAGE_SETTINGS = 18;
+  BACK_GESTURE = 19;
+  UNDO = 20;
 }
 
 enum TipType {
@@ -122,6 +125,7 @@ enum TipType {
   SWIPE_UP_TEXT = 2;
   QUICK_SCRUB_TEXT = 3;
   PREDICTION_TEXT = 4;
+  DWB_TOAST = 5;
 }
 
 // Used to define the action component of the LauncherEvent.
@@ -141,6 +145,7 @@ message Action {
     SWIPE = 3;
     FLING = 4;
     PINCH = 5;
+    SWIPE_NOOP = 6;
   }
 
   enum Direction {
@@ -149,6 +154,8 @@ message Action {
     DOWN = 2;
     LEFT = 3;
     RIGHT = 4;
+    UPRIGHT = 5;
+    UPLEFT = 6;
   }
   enum Command {
     HOME_INTENT = 0;

@@ -40,6 +40,7 @@ import com.android.launcher3.R;
 import com.android.launcher3.anim.AnimationSuccessListener;
 import com.android.launcher3.anim.Interpolators;
 import com.android.launcher3.anim.RoundedRectRevealOutlineProvider;
+import com.android.launcher3.util.Themes;
 import com.android.launcher3.views.BaseDragLayer;
 import com.android.quickstep.TaskSystemShortcut;
 import com.android.quickstep.TaskUtils;
@@ -208,13 +209,7 @@ public class TaskMenuView extends AbstractFloatingView {
                 R.layout.task_view_menu_option, this, false);
         menuOption.setIconAndLabelFor(
                 menuOptionView.findViewById(R.id.icon), menuOptionView.findViewById(R.id.text));
-        if (ENABLE_QUICKSTEP_LIVE_TILE.get()) {
-            menuOptionView.setOnClickListener(
-                    view -> mTaskView.getRecentsView().takeScreenshotAndFinishRecentsAnimation(true,
-                            () -> onClickListener.onClick(view)));
-        } else {
-            menuOptionView.setOnClickListener(onClickListener);
-        }
+        menuOptionView.setOnClickListener(onClickListener);
         mOptionLayout.addView(menuOptionView);
     }
 
@@ -276,7 +271,7 @@ public class TaskMenuView extends AbstractFloatingView {
     }
 
     private RoundedRectRevealOutlineProvider createOpenCloseOutlineProvider() {
-        float radius = getResources().getDimension(R.dimen.task_corner_radius);
+        float radius = Themes.getDialogCornerRadius(getContext());
         Rect fromRect = new Rect(0, 0, getWidth(), 0);
         Rect toRect = new Rect(0, 0, getWidth(), getHeight());
         return new RoundedRectRevealOutlineProvider(radius, radius, fromRect, toRect);

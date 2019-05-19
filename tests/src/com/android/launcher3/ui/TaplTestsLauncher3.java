@@ -25,7 +25,6 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Intent;
-import android.content.pm.LauncherActivityInfo;
 import android.util.Log;
 
 import androidx.test.filters.LargeTest;
@@ -34,6 +33,7 @@ import androidx.test.uiautomator.UiDevice;
 
 import com.android.launcher3.Launcher;
 import com.android.launcher3.LauncherState;
+import com.android.launcher3.TestProtocol;
 import com.android.launcher3.popup.ArrowPopup;
 import com.android.launcher3.tapl.AllApps;
 import com.android.launcher3.tapl.AppIcon;
@@ -61,6 +61,7 @@ import java.io.IOException;
 @RunWith(AndroidJUnit4.class)
 public class TaplTestsLauncher3 extends AbstractLauncherUiTest {
     private static final String TAG = "TaplTestsAosp";
+    private static final String APP_NAME = "LauncherTestApp";
 
     private static int sScreenshotCount = 0;
 
@@ -118,6 +119,8 @@ public class TaplTestsLauncher3 extends AbstractLauncherUiTest {
         test.waitForLauncherCondition("Launcher didn't start", launcher -> launcher != null);
         test.waitForState("Launcher internal state didn't switch to Home", LauncherState.NORMAL);
         test.waitForResumed("Launcher internal state is still Background");
+        // Check that we switched to home.
+        test.mLauncher.getWorkspace();
     }
 
     // Please don't add negative test cases for methods that fail only after a long wait.
@@ -206,8 +209,8 @@ public class TaplTestsLauncher3 extends AbstractLauncherUiTest {
         // Test that ensureWorkspaceIsScrollable adds a page by dragging an icon there.
         executeOnLauncher(launcher -> assertFalse("Initial workspace state is scrollable",
                 isWorkspaceScrollable(launcher)));
-        assertNull("Messages app was found on empty workspace",
-                workspace.tryGetWorkspaceAppIcon("Messages"));
+        assertNull("Chrome app was found on empty workspace",
+                workspace.tryGetWorkspaceAppIcon("Chrome"));
 
         workspace.ensureWorkspaceIsScrollable();
 
@@ -217,8 +220,8 @@ public class TaplTestsLauncher3 extends AbstractLauncherUiTest {
         executeOnLauncher(
                 launcher -> assertTrue("ensureScrollable didn't make workspace scrollable",
                         isWorkspaceScrollable(launcher)));
-        assertNotNull("ensureScrollable didn't add Messages app",
-                workspace.tryGetWorkspaceAppIcon("Messages"));
+        assertNotNull("ensureScrollable didn't add Chrome app",
+                workspace.tryGetWorkspaceAppIcon("Chrome"));
 
         // Test flinging workspace.
         workspace.flingBackward();
@@ -234,10 +237,10 @@ public class TaplTestsLauncher3 extends AbstractLauncherUiTest {
         assertTrue("Launcher internal state is not Home", isInState(LauncherState.NORMAL));
 
         // Test starting a workspace app.
-        final AppIcon app = workspace.tryGetWorkspaceAppIcon("Messages");
-        assertNotNull("No Messages app in workspace", app);
+        final AppIcon app = workspace.tryGetWorkspaceAppIcon("Chrome");
+        assertNotNull("No Chrome app in workspace", app);
         assertNotNull("AppIcon.launch returned null",
-                app.launch(resolveSystemApp(Intent.CATEGORY_APP_MESSAGING)));
+                app.launch(resolveSystemApp(Intent.CATEGORY_APP_BROWSER)));
         executeOnLauncher(launcher -> assertTrue(
                 "Launcher activity is the top activity; expecting another activity to be the top "
                         + "one",
@@ -306,12 +309,11 @@ public class TaplTestsLauncher3 extends AbstractLauncherUiTest {
     @PortraitLandscape
     public void testLaunchMenuItem() throws Exception {
         if (!TestHelpers.isInLauncherProcess()) return;
-        final LauncherActivityInfo testApp = getSettingsApp();
 
         final AppIconMenu menu = mLauncher.
                 getWorkspace().
                 switchToAllApps().
-                getAppIcon(testApp.getLabel().toString()).
+                getAppIcon(APP_NAME).
                 openMenu();
 
         executeOnLauncher(
@@ -321,31 +323,32 @@ public class TaplTestsLauncher3 extends AbstractLauncherUiTest {
         final AppIconMenuItem menuItem = menu.getMenuItem(1);
         final String itemName = menuItem.getText();
 
-        menuItem.launch(testApp.getComponentName().getPackageName(), itemName);
+        menuItem.launch(getAppPackageName());
     }
 
     @Test
     @PortraitLandscape
     public void testDragAppIcon() throws Throwable {
-        LauncherActivityInfo settingsApp = getSettingsApp();
-
-        final String appName = settingsApp.getLabel().toString();
-        // 1. Open all apps and wait for load complete.
-        // 2. Drag icon to homescreen.
-        // 3. Verify that the icon works on homescreen.
-        mLauncher.getWorkspace().
-                switchToAllApps().
-                getAppIcon(appName).
-                dragToWorkspace().
-                getWorkspaceAppIcon(appName).
-                launch(settingsApp.getComponentName().getPackageName());
+        try {
+            TestProtocol.sDebugTracing = true;
+            // 1. Open all apps and wait for load complete.
+            // 2. Drag icon to homescreen.
+            // 3. Verify that the icon works on homescreen.
+            mLauncher.getWorkspace().
+                    switchToAllApps().
+                    getAppIcon(APP_NAME).
+                    dragToWorkspace().
+                    getWorkspaceAppIcon(APP_NAME).
+                    launch(getAppPackageName());
+        } finally {
+            TestProtocol.sDebugTracing = false;
+        }
     }
 
     @Test
     @PortraitLandscape
     public void testDragShortcut() throws Throwable {
         if (!TestHelpers.isInLauncherProcess()) return;
-        LauncherActivityInfo testApp = getSettingsApp();
 
         // 1. Open all apps and wait for load complete.
         // 2. Find the app and long press it to show shortcuts.
@@ -353,7 +356,7 @@ public class TaplTestsLauncher3 extends AbstractLauncherUiTest {
         final AppIconMenuItem menuItem = mLauncher.
                 getWorkspace().
                 switchToAllApps().
-                getAppIcon(testApp.getLabel().toString()).
+                getAppIcon(APP_NAME).
                 openMenu().
                 getMenuItem(0);
         final String shortcutName = menuItem.getText();
@@ -364,6 +367,10 @@ public class TaplTestsLauncher3 extends AbstractLauncherUiTest {
         menuItem.
                 dragToWorkspace().
                 getWorkspaceAppIcon(shortcutName).
-                launch(testApp.getComponentName().getPackageName(), shortcutName);
+                launch(getAppPackageName());
+    }
+
+    public static String getAppPackageName() {
+        return getInstrumentation().getContext().getPackageName();
     }
 }

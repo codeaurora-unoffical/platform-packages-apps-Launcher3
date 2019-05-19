@@ -38,7 +38,8 @@
 
         <service
             android:name="com.android.quickstep.TouchInteractionService"
-            android:permission="android.permission.STATUS_BAR_SERVICE" >
+            android:permission="android.permission.STATUS_BAR_SERVICE"
+            android:directBootAware="true" >
             <intent-filter>
                 <action android:name="android.intent.action.QUICKSTEP_SERVICE" />
             </intent-filter>
@@ -70,6 +71,14 @@
             <intent-filter>
                 <action android:name="android.content.action.SEARCH_INDEXABLES_PROVIDER" />
             </intent-filter>
+        </provider>
+
+        <provider
+            android:name="com.android.quickstep.TestInformationProvider"
+            android:authorities="${packageName}.TestInfo"
+            android:readPermission="android.permission.WRITE_SECURE_SETTINGS"
+            android:writePermission="android.permission.WRITE_SECURE_SETTINGS"
+            android:exported="true">
         </provider>
 
         <service

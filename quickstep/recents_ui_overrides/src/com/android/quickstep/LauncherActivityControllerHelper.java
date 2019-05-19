@@ -16,42 +16,45 @@
 package com.android.quickstep;
 
 import static android.view.View.TRANSLATION_Y;
-
 import static com.android.launcher3.LauncherAnimUtils.SCALE_PROPERTY;
 import static com.android.launcher3.LauncherState.BACKGROUND_APP;
 import static com.android.launcher3.LauncherState.NORMAL;
 import static com.android.launcher3.LauncherState.OVERVIEW;
 import static com.android.launcher3.allapps.AllAppsTransitionController.SPRING_DAMPING_RATIO;
 import static com.android.launcher3.allapps.AllAppsTransitionController.SPRING_STIFFNESS;
+import static com.android.launcher3.anim.Interpolators.ACCEL_DEACCEL;
 import static com.android.launcher3.anim.Interpolators.LINEAR;
+import static com.android.quickstep.WindowTransformSwipeHandler.RECENTS_ATTACH_DURATION;
 
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
-import android.content.ComponentName;
 import android.content.Context;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Region;
+import android.os.UserHandle;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.animation.Interpolator;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.annotation.UiThread;
+
 import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.Launcher;
 import com.android.launcher3.LauncherAppState;
-import com.android.launcher3.LauncherInitListener;
+import com.android.launcher3.LauncherInitListenerEx;
 import com.android.launcher3.LauncherState;
 import com.android.launcher3.allapps.DiscoveryBounce;
 import com.android.launcher3.anim.AnimatorPlaybackController;
 import com.android.launcher3.anim.SpringObjectAnimator;
 import com.android.launcher3.compat.AccessibilityManagerCompat;
-import com.android.launcher3.config.FeatureFlags;
-import com.android.launcher3.dragndrop.DragLayer;
 import com.android.launcher3.userevent.nano.LauncherLogProto;
-import com.android.launcher3.util.MultiValueAlpha.AlphaProperty;
 import com.android.launcher3.views.FloatingIconView;
+import com.android.quickstep.SysUINavigationMode.Mode;
 import com.android.quickstep.util.ClipAnimationHelper;
 import com.android.quickstep.util.LayoutUtils;
 import com.android.quickstep.views.RecentsView;
@@ -61,10 +64,6 @@ import com.android.systemui.shared.system.RemoteAnimationTargetCompat;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
-import androidx.annotation.UiThread;
-
 /**
  * {@link ActivityControlHelper} for the in-launcher recents.
  */
@@ -73,7 +72,7 @@ public final class LauncherActivityControllerHelper implements ActivityControlHe
     @Override
     public int getSwipeUpDestinationAndLength(DeviceProfile dp, Context context, Rect outRect) {
         LayoutUtils.calculateLauncherTaskSize(context, dp, outRect);
-        if (dp.isVerticalBarLayout()) {
+        if (dp.isVerticalBarLayout() && SysUINavigationMode.getMode(context) != Mode.NO_BUTTON) {
             Rect targetInsets = dp.getInsets();
             int hotseatInset = dp.isSeascape() ? targetInsets.left : targetInsets.right;
             return dp.hotseatBarSizePx + hotseatInset;
@@ -95,22 +94,32 @@ public final class LauncherActivityControllerHelper implements ActivityControlHe
         DiscoveryBounce.showForOverviewIfNeeded(activity);
     }
 
+    @Override
+    public void onAssistantVisibilityChanged(float visibility) {
+        Launcher launcher = getCreatedActivity();
+        if (launcher != null) {
+            launcher.onAssistantVisibilityChanged(visibility);
+        }
+    }
+
     @NonNull
     @Override
     public HomeAnimationFactory prepareHomeUI(Launcher activity) {
         final DeviceProfile dp = activity.getDeviceProfile();
         final RecentsView recentsView = activity.getOverviewPanel();
-        final ComponentName component = recentsView.getRunningTaskView().getTask().key
-                .sourceComponent;
-
-        final View workspaceView = activity.getWorkspace().getFirstMatchForAppClose(component);
-        final FloatingIconView floatingView = workspaceView == null ? null
-                : new FloatingIconView(activity);
-        final Rect iconLocation = new Rect();
-        if (floatingView != null) {
-            floatingView.matchPositionOf(activity, workspaceView, true /* hideOriginal */,
-                    iconLocation);
+        final TaskView runningTaskView = recentsView.getRunningTaskView();
+        final View workspaceView;
+        if (runningTaskView != null && runningTaskView.getTask().key.getComponent() != null) {
+            workspaceView = activity.getWorkspace().getFirstMatchForAppClose(
+                    runningTaskView.getTask().key.getComponent().getPackageName(),
+                    UserHandle.of(runningTaskView.getTask().key.userId));
+        } else {
+            workspaceView = null;
         }
+        final Rect iconLocation = new Rect();
+        final FloatingIconView floatingView = workspaceView == null ? null
+                : FloatingIconView.getFloatingIconView(activity, workspaceView,
+                true /* hideOriginal */, iconLocation, false /* isOpening */, null /* recycle */);
 
         return new HomeAnimationFactory() {
             @Nullable
@@ -137,10 +146,9 @@ public final class LauncherActivityControllerHelper implements ActivityControlHe
 
             @NonNull
             @Override
-            public Animator createActivityAnimationToHome() {
+            public AnimatorPlaybackController createActivityAnimationToHome() {
                 long accuracy = 2 * Math.max(dp.widthPx, dp.heightPx);
-                return activity.getStateManager().createAnimationToNewWorkspace(
-                        NORMAL, accuracy).getTarget();
+                return activity.getStateManager().createAnimationToNewWorkspace(NORMAL, accuracy);
             }
         };
     }
@@ -156,30 +164,26 @@ public final class LauncherActivityControllerHelper implements ActivityControlHe
         }
         activity.getStateManager().setRestState(resetState);
 
-        final LauncherState fromState;
-        if (!activityVisible) {
-            // Since the launcher is not visible, we can safely reset the scroll position.
-            // This ensures then the next swipe up to all-apps starts from scroll 0.
-            activity.getAppsView().reset(false /* animate */);
-            fromState = animateActivity ? BACKGROUND_APP : OVERVIEW;
-            activity.getStateManager().goToState(fromState, false);
+        final LauncherState fromState = animateActivity ? BACKGROUND_APP : OVERVIEW;
+        activity.getStateManager().goToState(fromState, false);
+        // Since all apps is not visible, we can safely reset the scroll position.
+        // This ensures then the next swipe up to all-apps starts from scroll 0.
+        activity.getAppsView().reset(false /* animate */);
 
-            // Optimization, hide the all apps view to prevent layout while initializing
-            activity.getAppsView().getContentView().setVisibility(View.GONE);
+        // Optimization, hide the all apps view to prevent layout while initializing
+        activity.getAppsView().getContentView().setVisibility(View.GONE);
 
-            AccessibilityManagerCompat.sendStateEventToTest(activity, fromState.ordinal);
-        } else {
-            fromState = startState;
-        }
+        AccessibilityManagerCompat.sendStateEventToTest(activity, fromState.ordinal);
 
         return new AnimationFactory() {
             private Animator mShelfAnim;
             private ShelfAnimState mShelfState;
+            private Animator mAttachToWindowAnim;
+            private boolean mIsAttachedToWindow;
 
             @Override
             public void createActivityController(long transitionLength) {
-                createActivityControllerInternal(activity, activityVisible, fromState,
-                        transitionLength, callback);
+                createActivityControllerInternal(activity, fromState, transitionLength, callback);
             }
 
             @Override
@@ -220,29 +224,42 @@ public final class LauncherActivityControllerHelper implements ActivityControlHe
                 mShelfAnim.setDuration(duration);
                 mShelfAnim.start();
             }
+
+            @Override
+            public void setRecentsAttachedToAppWindow(boolean attached, boolean animate) {
+                if (mIsAttachedToWindow == attached && animate) {
+                    return;
+                }
+                mIsAttachedToWindow = attached;
+                if (mAttachToWindowAnim != null) {
+                    mAttachToWindowAnim.cancel();
+                }
+                mAttachToWindowAnim = ObjectAnimator.ofFloat(activity.getOverviewPanel(),
+                        RecentsView.CONTENT_ALPHA, attached ? 1 : 0);
+                mAttachToWindowAnim.addListener(new AnimatorListenerAdapter() {
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+                        mAttachToWindowAnim = null;
+                    }
+                });
+                mAttachToWindowAnim.setInterpolator(ACCEL_DEACCEL);
+                mAttachToWindowAnim.setDuration(animate ? RECENTS_ATTACH_DURATION : 0);
+                mAttachToWindowAnim.start();
+            }
         };
     }
 
-    private void createActivityControllerInternal(Launcher activity, boolean wasVisible,
-            LauncherState fromState, long transitionLength,
-            Consumer<AnimatorPlaybackController> callback) {
+    private void createActivityControllerInternal(Launcher activity, LauncherState fromState,
+            long transitionLength, Consumer<AnimatorPlaybackController> callback) {
         LauncherState endState = OVERVIEW;
-        if (wasVisible && fromState != BACKGROUND_APP) {
-            // If a translucent app was launched fom launcher, animate launcher states.
-            DeviceProfile dp = activity.getDeviceProfile();
-            long accuracy = 2 * Math.max(dp.widthPx, dp.heightPx);
-            callback.accept(activity.getStateManager()
-                    .createAnimationToNewWorkspace(fromState, endState, accuracy));
-            return;
-        }
         if (fromState == endState) {
             return;
         }
 
         AnimatorSet anim = new AnimatorSet();
         if (!activity.getDeviceProfile().isVerticalBarLayout()
-                && !FeatureFlags.SWIPE_HOME.get()) {
-            // Don't animate the shelf when SWIPE_HOME is true, because we update it atomically.
+                && SysUINavigationMode.getMode(activity) != Mode.NO_BUTTON) {
+            // Don't animate the shelf when the mode is NO_BUTTON, because we update it atomically.
             Animator shiftAnim = createShelfAnim(activity,
                     fromState.getVerticalProgress(activity),
                     endState.getVerticalProgress(activity));
@@ -287,7 +304,7 @@ public final class LauncherActivityControllerHelper implements ActivityControlHe
         // starting to line up the side pages during swipe up)
         float prevRvScale = recentsView.getScaleX();
         float prevRvTransY = recentsView.getTranslationY();
-        float targetRvScale = endState.getOverviewScaleAndTranslationYFactor(launcher)[0];
+        float targetRvScale = endState.getOverviewScaleAndTranslation(launcher).scale;
         SCALE_PROPERTY.set(recentsView, targetRvScale);
         recentsView.setTranslationY(0);
         ClipAnimationHelper clipHelper = new ClipAnimationHelper(launcher);
@@ -312,7 +329,7 @@ public final class LauncherActivityControllerHelper implements ActivityControlHe
     @Override
     public ActivityInitListener createActivityInitListener(
             BiPredicate<Launcher, Boolean> onInitListener) {
-        return new LauncherInitListener(onInitListener);
+        return new LauncherInitListenerEx(onInitListener);
     }
 
     @Nullable
@@ -370,11 +387,6 @@ public final class LauncherActivityControllerHelper implements ActivityControlHe
     @Override
     public boolean shouldMinimizeSplitScreen() {
         return true;
-    }
-
-    @Override
-    public AlphaProperty getAlphaProperty(Launcher activity) {
-        return activity.getDragLayer().getAlphaProperty(DragLayer.ALPHA_INDEX_SWIPE_UP);
     }
 
     @Override

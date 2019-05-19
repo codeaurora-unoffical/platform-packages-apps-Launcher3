@@ -24,7 +24,7 @@ import android.animation.FloatArrayEvaluator;
 import android.animation.ValueAnimator;
 import android.animation.ValueAnimator.AnimatorUpdateListener;
 import android.annotation.TargetApi;
-import android.content.pm.LauncherActivityInfo;
+import android.content.pm.ShortcutInfo;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -54,18 +54,11 @@ import com.android.launcher3.R;
 import com.android.launcher3.Utilities;
 import com.android.launcher3.FirstFrameAnimatorHelper;
 import com.android.launcher3.anim.Interpolators;
-import com.android.launcher3.compat.LauncherAppsCompat;
-import com.android.launcher3.compat.ShortcutConfigActivityInfo;
 import com.android.launcher3.icons.LauncherIcons;
-import com.android.launcher3.shortcuts.DeepShortcutManager;
-import com.android.launcher3.shortcuts.ShortcutInfoCompat;
-import com.android.launcher3.shortcuts.ShortcutKey;
 import com.android.launcher3.util.Themes;
 import com.android.launcher3.util.Thunk;
-import com.android.launcher3.widget.PendingAddShortcutInfo;
 
 import java.util.Arrays;
-import java.util.List;
 
 import androidx.dynamicanimation.animation.FloatPropertyCompat;
 import androidx.dynamicanimation.animation.SpringAnimation;
@@ -204,11 +197,12 @@ public class DragView extends View {
             public void run() {
                 LauncherAppState appState = LauncherAppState.getInstance(mLauncher);
                 Object[] outObj = new Object[1];
-                Drawable dr = getFullDrawable(info, appState, outObj);
+                int w = mBitmap.getWidth();
+                int h = mBitmap.getHeight();
+                Drawable dr = Utilities.getFullDrawable(mLauncher, info, w, h,
+                        false /* flattenDrawable */, outObj);
 
                 if (dr instanceof AdaptiveIconDrawable) {
-                    int w = mBitmap.getWidth();
-                    int h = mBitmap.getHeight();
                     int blurMargin = (int) mLauncher.getResources()
                             .getDimension(R.dimen.blur_size_medium_outline) / 2;
 
@@ -314,49 +308,6 @@ public class DragView extends View {
     }
 
     /**
-     * Returns the full drawable for {@param info}.
-     * @param outObj this is set to the internal data associated with {@param info},
-     *               eg {@link LauncherActivityInfo} or {@link ShortcutInfoCompat}.
-     */
-    private Drawable getFullDrawable(ItemInfo info, LauncherAppState appState, Object[] outObj) {
-        if (info.itemType == LauncherSettings.Favorites.ITEM_TYPE_APPLICATION) {
-            LauncherActivityInfo activityInfo = LauncherAppsCompat.getInstance(mLauncher)
-                    .resolveActivity(info.getIntent(), info.user);
-            outObj[0] = activityInfo;
-            return (activityInfo != null) ? appState.getIconCache()
-                    .getFullResIcon(activityInfo, false) : null;
-        } else if (info.itemType == LauncherSettings.Favorites.ITEM_TYPE_DEEP_SHORTCUT) {
-            if (info instanceof PendingAddShortcutInfo) {
-                ShortcutConfigActivityInfo activityInfo =
-                        ((PendingAddShortcutInfo) info).activityInfo;
-                outObj[0] = activityInfo;
-                return activityInfo.getFullResIcon(appState.getIconCache());
-            }
-            ShortcutKey key = ShortcutKey.fromItemInfo(info);
-            DeepShortcutManager sm = DeepShortcutManager.getInstance(mLauncher);
-            List<ShortcutInfoCompat> si = sm.queryForFullDetails(
-                    key.componentName.getPackageName(), Arrays.asList(key.getId()), key.user);
-            if (si.isEmpty()) {
-                return null;
-            } else {
-                outObj[0] = si.get(0);
-                return sm.getShortcutIconDrawable(si.get(0),
-                        appState.getInvariantDeviceProfile().fillResIconDpi);
-            }
-        } else if (info.itemType == LauncherSettings.Favorites.ITEM_TYPE_FOLDER) {
-            FolderAdaptiveIcon icon =  FolderAdaptiveIcon.createFolderAdaptiveIcon(
-                    mLauncher, info.id, new Point(mBitmap.getWidth(), mBitmap.getHeight()));
-            if (icon == null) {
-                return null;
-            }
-            outObj[0] = icon;
-            return icon;
-        } else {
-            return null;
-        }
-    }
-
-    /**
      * For apps icons and shortcut icons that have badges, this method creates a drawable that can
      * later on be rendered on top of the layers for the badges. For app icons, work profile badges
      * can only be applied. For deep shortcuts, when dragged from the pop up container, there's no
@@ -370,11 +321,11 @@ public class DragView extends View {
             boolean iconBadged = (info instanceof ItemInfoWithIcon)
                     && (((ItemInfoWithIcon) info).runtimeStatusFlags & FLAG_ICON_BADGED) > 0;
             if ((info.id == ItemInfo.NO_ID && !iconBadged)
-                    || !(obj instanceof ShortcutInfoCompat)) {
+                    || !(obj instanceof ShortcutInfo)) {
                 // The item is not yet added on home screen.
                 return new FixedSizeEmptyDrawable(iconSize);
             }
-            ShortcutInfoCompat si = (ShortcutInfoCompat) obj;
+            ShortcutInfo si = (ShortcutInfo) obj;
             LauncherIcons li = LauncherIcons.obtain(appState.getContext());
             Bitmap badge = li.getShortcutInfoBadge(si, appState.getIconCache()).iconBitmap;
             li.recycle();

@@ -19,9 +19,13 @@ package com.android.launcher3;
 import static com.android.launcher3.LauncherAnimUtils.OVERVIEW_TRANSITION_MS;
 import static com.android.launcher3.LauncherAnimUtils.SPRING_LOADED_EXIT_DELAY;
 import static com.android.launcher3.LauncherAnimUtils.SPRING_LOADED_TRANSITION_MS;
+import static com.android.launcher3.LauncherSettings.Favorites.ITEM_TYPE_APPLICATION;
+import static com.android.launcher3.LauncherSettings.Favorites.ITEM_TYPE_DEEP_SHORTCUT;
+import static com.android.launcher3.LauncherSettings.Favorites.ITEM_TYPE_SHORTCUT;
 import static com.android.launcher3.LauncherState.ALL_APPS;
 import static com.android.launcher3.LauncherState.NORMAL;
 import static com.android.launcher3.LauncherState.SPRING_LOADED;
+import static com.android.launcher3.config.FeatureFlags.ADAPTIVE_ICON_WINDOW_ANIM;
 import static com.android.launcher3.dragndrop.DragLayer.ALPHA_INDEX_OVERLAY;
 
 import android.animation.Animator;
@@ -34,7 +38,6 @@ import android.annotation.SuppressLint;
 import android.app.WallpaperManager;
 import android.appwidget.AppWidgetHostView;
 import android.appwidget.AppWidgetProviderInfo;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
@@ -44,8 +47,10 @@ import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.os.Handler;
 import android.os.IBinder;
+import android.os.Message;
 import android.os.Parcelable;
 import android.os.UserHandle;
+import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.util.SparseArray;
@@ -98,8 +103,6 @@ import com.android.launcher3.widget.PendingAppWidgetHostView;
 
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.Objects;
-import java.util.Set;
 import java.util.function.Predicate;
 
 /**
@@ -295,12 +298,12 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
 
         if (grid.shouldFadeAdjacentWorkspaceScreens()) {
             // In landscape mode the page spacing is set to the default.
-            setPageSpacing(grid.defaultPageSpacingPx);
+            setPageSpacing(grid.edgeMarginPx);
         } else {
             // In portrait, we want the pages spaced such that there is no
             // overhang of the previous / next page into the current page viewport.
             // We assume symmetrical padding in portrait mode.
-            setPageSpacing(Math.max(grid.defaultPageSpacingPx, padding.left + 1));
+            setPageSpacing(Math.max(grid.edgeMarginPx, padding.left + 1));
         }
 
         int paddingLeftRight = grid.cellLayoutPaddingLeftRightPx;
@@ -472,19 +475,12 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
         super.onViewAdded(child);
     }
 
-    protected boolean onInterceptHotseatTouch(View v, MotionEvent ev) {
-        // We don't want any clicks to go through to the hotseat unless the workspace is in
-        // the normal state or an accessible drag is in progress.
-        return !workspaceIconsCanBeDragged()
-                && !mLauncher.getAccessibilityDelegate().isInAccessibleDrag();
-    }
-
     /**
      * Initializes and binds the first page
      * @param qsb an existing qsb to recycle or null.
      */
     public void bindAndInitFirstWorkspaceScreen(View qsb) {
-        if (!FeatureFlags.QSB_ON_FIRST_SCREEN.get()) {
+        if (!FeatureFlags.QSB_ON_FIRST_SCREEN) {
             return;
         }
         // Add the first page
@@ -520,6 +516,9 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
         removeAllViews();
         mScreenOrder.clear();
         mWorkspaceScreens.clear();
+
+        // Remove any deferred refresh callbacks
+        mLauncher.mHandler.removeCallbacksAndMessages(DeferredWidgetRefresh.class);
 
         // Ensure that the first page is always present
         bindAndInitFirstWorkspaceScreen(qsb);
@@ -788,7 +787,7 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
             int id = mWorkspaceScreens.keyAt(i);
             CellLayout cl = mWorkspaceScreens.valueAt(i);
             // FIRST_SCREEN_ID can never be removed.
-            if ((!FeatureFlags.QSB_ON_FIRST_SCREEN.get() || id > FIRST_SCREEN_ID)
+            if ((!FeatureFlags.QSB_ON_FIRST_SCREEN || id > FIRST_SCREEN_ID)
                     && cl.getShortcutsAndWidgets().getChildCount() == 0) {
                 removeScreens.add(id);
             }
@@ -957,7 +956,8 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
 
     private boolean isScrollingOverlay() {
         return mLauncherOverlay != null &&
-                ((mIsRtl && getUnboundedScrollX() > mMaxScrollX) || (!mIsRtl && getUnboundedScrollX() < 0));
+                ((mIsRtl && getUnboundedScrollX() > mMaxScrollX)
+                        || (!mIsRtl && getUnboundedScrollX() < mMinScrollX));
     }
 
     @Override
@@ -1440,6 +1440,10 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
 
     public DragView beginDragShared(View child, DragSource source, ItemInfo dragObject,
             DragPreviewProvider previewProvider, DragOptions dragOptions) {
+        if (com.android.launcher3.TestProtocol.sDebugTracing) {
+            android.util.Log.d(com.android.launcher3.TestProtocol.NO_DRAG_TAG,
+                    "beginDragShared");
+        }
         float iconScale = 1f;
         if (child instanceof BubbleTextView) {
             Drawable icon = ((BubbleTextView) child).getIcon();
@@ -1606,9 +1610,9 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
             return false;
         }
 
-        boolean aboveShortcut = (dropOverView.getTag() instanceof ShortcutInfo);
+        boolean aboveShortcut = (dropOverView.getTag() instanceof WorkspaceItemInfo);
         boolean willBecomeShortcut =
-                (info.itemType == LauncherSettings.Favorites.ITEM_TYPE_APPLICATION ||
+                (info.itemType == ITEM_TYPE_APPLICATION ||
                         info.itemType == LauncherSettings.Favorites.ITEM_TYPE_SHORTCUT ||
                         info.itemType == LauncherSettings.Favorites.ITEM_TYPE_DEEP_SHORTCUT);
 
@@ -1655,12 +1659,12 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
         mCreateUserFolderOnDrop = false;
         final int screenId = getIdForScreen(target);
 
-        boolean aboveShortcut = (v.getTag() instanceof ShortcutInfo);
-        boolean willBecomeShortcut = (newView.getTag() instanceof ShortcutInfo);
+        boolean aboveShortcut = (v.getTag() instanceof WorkspaceItemInfo);
+        boolean willBecomeShortcut = (newView.getTag() instanceof WorkspaceItemInfo);
 
         if (aboveShortcut && willBecomeShortcut) {
-            ShortcutInfo sourceInfo = (ShortcutInfo) newView.getTag();
-            ShortcutInfo destInfo = (ShortcutInfo) v.getTag();
+            WorkspaceItemInfo sourceInfo = (WorkspaceItemInfo) newView.getTag();
+            WorkspaceItemInfo destInfo = (WorkspaceItemInfo) v.getTag();
             // if the drag started here, we need to remove it from the workspace
             if (!external) {
                 getParentCellLayoutForView(mDragInfo.cell).removeView(mDragInfo.cell);
@@ -2415,8 +2419,8 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
      */
     private void onDropExternal(final int[] touchXY, final CellLayout cellLayout, DragObject d) {
         if (d.dragInfo instanceof PendingAddShortcutInfo) {
-            ShortcutInfo si = ((PendingAddShortcutInfo) d.dragInfo)
-                    .activityInfo.createShortcutInfo();
+            WorkspaceItemInfo si = ((PendingAddShortcutInfo) d.dragInfo)
+                    .activityInfo.createWorkspaceItemInfo();
             if (si != null) {
                 d.dragInfo = si;
             }
@@ -2516,15 +2520,15 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
             View view;
 
             switch (info.itemType) {
-            case LauncherSettings.Favorites.ITEM_TYPE_APPLICATION:
+            case ITEM_TYPE_APPLICATION:
             case LauncherSettings.Favorites.ITEM_TYPE_SHORTCUT:
             case LauncherSettings.Favorites.ITEM_TYPE_DEEP_SHORTCUT:
                 if (info.container == NO_ID && info instanceof AppInfo) {
                     // Came from all apps -- make a copy
-                    info = ((AppInfo) info).makeShortcut();
+                    info = ((AppInfo) info).makeWorkspaceItem();
                     d.dragInfo = info;
                 }
-                view = mLauncher.createShortcut(cellLayout, (ShortcutInfo) info);
+                view = mLauncher.createShortcut(cellLayout, (WorkspaceItemInfo) info);
                 break;
             case LauncherSettings.Favorites.ITEM_TYPE_FOLDER:
                 view = FolderIcon.fromXml(R.layout.folder_icon, mLauncher, cellLayout,
@@ -2892,51 +2896,29 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
     }
 
     /**
-     * Returns a list of all the CellLayouts on the Homescreen, starting with
-     * {@param startPage}, then going outward alternating between pages prior to the startPage,
-     * and then the pages after the startPage.
-     * ie. if there are 5 pages [0, 1, 2, 3, 4] and startPage is 1, we return [1, 0, 2, 3, 4].
-     */
-    private CellLayout[] getWorkspaceCellLayouts(int startPage) {
-        int screenCount = getChildCount();
-        final CellLayout[] layouts = new CellLayout[screenCount];
-        int screen = 0;
-
-        layouts[screen] = (CellLayout) getChildAt(startPage);
-        screen++;
-
-        for (int i = 1; screen < screenCount; ++i) {
-            CellLayout prevPage = (CellLayout) getChildAt(startPage - i);
-            CellLayout nextPage = (CellLayout) getChildAt(startPage + i);
-
-            if (prevPage != null) {
-                layouts[screen] = prevPage;
-                screen++;
-            }
-            if (nextPage != null) {
-                layouts[screen] = nextPage;
-                screen++;
-            }
-        }
-        return layouts;
-    }
-
-    /**
      * Similar to {@link #getFirstMatch} but optimized to finding a suitable view for the app close
      * animation.
      *
-     * @param component The component of the task being dismissed.
+     * @param packageName The package name of the app to match.
+     * @param user The user of the app to match.
      */
-    public View getFirstMatchForAppClose(ComponentName component) {
+    public View getFirstMatchForAppClose(String packageName, UserHandle user) {
         final int curPage = getCurrentPage();
         final CellLayout currentPage = (CellLayout) getPageAt(curPage);
-        final Workspace.ItemOperator isItemComponent = (info, view) ->
-                info != null && Objects.equals(info.getTargetComponent(), component);
-        final Workspace.ItemOperator isItemInFolder = (info, view) -> {
+        final Workspace.ItemOperator packageAndUser = (ItemInfo info, View view) -> info != null
+                && info.getTargetComponent() != null
+                && TextUtils.equals(info.getTargetComponent().getPackageName(), packageName)
+                && info.user.equals(user);
+        final Workspace.ItemOperator packageAndUserAndApp = (ItemInfo info, View view) ->
+                packageAndUser.evaluate(info, view) && info.itemType == ITEM_TYPE_APPLICATION;
+        final Workspace.ItemOperator packageAndUserAndShortcut = (ItemInfo info, View view) ->
+                packageAndUser.evaluate(info, view) && (info.itemType == ITEM_TYPE_SHORTCUT
+                        || info.itemType == ITEM_TYPE_DEEP_SHORTCUT);
+        final Workspace.ItemOperator packageAndUserInFolder = (info, view) -> {
             if (info instanceof FolderInfo) {
                 FolderInfo folderInfo = (FolderInfo) info;
-                for (ShortcutInfo shortcutInfo : folderInfo.contents) {
-                    if (Objects.equals(shortcutInfo.getTargetComponent(), component)) {
+                for (WorkspaceItemInfo shortcutInfo : folderInfo.contents) {
+                    if (packageAndUser.evaluate(shortcutInfo, view)) {
                         return true;
                     }
                 }
@@ -2944,33 +2926,16 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
             return false;
         };
 
-        CellLayout[] hotseatAndCurrentPage = new CellLayout[] { getHotseat(), currentPage };
-        // First we look if the app itself is in the hotseat or on the current workspace page.
-        View icon = getFirstMatch(hotseatAndCurrentPage, isItemComponent);
-        if (icon != null) {
-            return icon;
+        // Order: App icons, shortcuts, app/shortcut in folder. Items in hotseat get returned first.
+        if (ADAPTIVE_ICON_WINDOW_ANIM.get()) {
+            return getFirstMatch(new CellLayout[] { getHotseat(), currentPage },
+                    packageAndUserAndApp, packageAndUserAndShortcut, packageAndUserInFolder);
+        } else {
+            // Do not use Folder as a criteria, since it'll cause a crash when trying to draw
+            // FolderAdaptiveIcon as the background.
+            return getFirstMatch(new CellLayout[] { getHotseat(), currentPage },
+                    packageAndUserAndApp, packageAndUserAndShortcut);
         }
-        // Then we look if the app is in a folder on the hotseat or current workspace page.
-        icon = getFirstMatch(hotseatAndCurrentPage, isItemInFolder);
-        if (icon != null) {
-            return icon;
-        }
-        // Continue searching for the app or for a folder with the app on other pages of the
-        // workspace. We skip the current page, since we already searched above.
-        CellLayout[] allPages = getWorkspaceCellLayouts(curPage);
-        CellLayout[] page = new CellLayout[1];
-        for (int i = 1; i < allPages.length; ++i) {
-            page[0] = allPages[i];
-            icon = getFirstMatch(page, isItemComponent);
-            if (icon != null) {
-                return icon;
-            }
-            icon = getFirstMatch(page, isItemInFolder);
-            if (icon != null) {
-                return icon;
-            }
-        }
-        return null;
     }
 
     public View getHomescreenIconByItemId(final int id) {
@@ -2998,21 +2963,38 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
         return value[0];
     }
 
-    private View getFirstMatch(CellLayout[] cellLayouts, final ItemOperator operator) {
-        final View[] value = new View[1];
+    /**
+     * @param cellLayouts List of CellLayouts to scan, in order of preference.
+     * @param operators List of operators, in order starting from best matching operator.
+     * @return
+     */
+    private View getFirstMatch(CellLayout[] cellLayouts, final ItemOperator... operators) {
+        // This array is filled with the first match for each operator.
+        final View[] matches = new View[operators.length];
+        // For efficiency, the outer loop should be CellLayout.
         for (CellLayout cellLayout : cellLayouts) {
             mapOverCellLayout(MAP_NO_RECURSE, cellLayout, (info, v) -> {
-                if (operator.evaluate(info, v)) {
-                    value[0] = v;
-                    return true;
+                for (int i = 0; i < operators.length; ++i) {
+                    if (matches[i] == null && operators[i].evaluate(info, v)) {
+                        matches[i] = v;
+                        if (i == 0) {
+                            // We can return since this is the best match possible.
+                            return true;
+                        }
+                    }
                 }
                 return false;
             });
-            if (value[0] != null) {
+            if (matches[0] != null) {
                 break;
             }
         }
-        return value[0];
+        for (View match : matches) {
+            if (match != null) {
+                return match;
+            }
+        }
+        return null;
     }
 
     void clearDropTargets() {
@@ -3064,7 +3046,7 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
                     if (parent != null) {
                         FolderInfo folderInfo = (FolderInfo) parent.getTag();
                         folderInfo.prepareAutoUpdate();
-                        folderInfo.remove((ShortcutInfo) itemToRemove, false);
+                        folderInfo.remove((WorkspaceItemInfo) itemToRemove, false);
                     }
                 }
             }
@@ -3100,6 +3082,10 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
     }
 
     private boolean mapOverCellLayout(boolean recurse, CellLayout layout, ItemOperator op) {
+        // TODO(b/128460496) Potential race condition where layout is not yet loaded
+        if (layout == null) {
+            return false;
+        }
         ShortcutAndWidgetContainer container = layout.getShortcutsAndWidgets();
         // map over all the shortcuts on the workspace
         final int itemCount = container.getChildCount();
@@ -3127,13 +3113,13 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
         return false;
     }
 
-    void updateShortcuts(ArrayList<ShortcutInfo> shortcuts) {
+    void updateShortcuts(ArrayList<WorkspaceItemInfo> shortcuts) {
         int total  = shortcuts.size();
-        final HashSet<ShortcutInfo> updates = new HashSet<>(total);
+        final HashSet<WorkspaceItemInfo> updates = new HashSet<>(total);
         final IntSet folderIds = new IntSet();
 
         for (int i = 0; i < total; i++) {
-            ShortcutInfo s = shortcuts.get(i);
+            WorkspaceItemInfo s = shortcuts.get(i);
             updates.add(s);
             folderIds.add(s.container);
         }
@@ -3141,14 +3127,14 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
         mapOverItems(MAP_RECURSE, new ItemOperator() {
             @Override
             public boolean evaluate(ItemInfo info, View v) {
-                if (info instanceof ShortcutInfo && v instanceof BubbleTextView &&
+                if (info instanceof WorkspaceItemInfo && v instanceof BubbleTextView &&
                         updates.contains(info)) {
-                    ShortcutInfo si = (ShortcutInfo) info;
+                    WorkspaceItemInfo si = (WorkspaceItemInfo) info;
                     BubbleTextView shortcut = (BubbleTextView) v;
                     Drawable oldIcon = shortcut.getIcon();
                     boolean oldPromiseState = (oldIcon instanceof PreloadIconDrawable)
                             && ((PreloadIconDrawable) oldIcon).hasNotCompleted();
-                    shortcut.applyFromShortcutInfo(si, si.isPromise() != oldPromiseState);
+                    shortcut.applyFromWorkspaceItem(si, si.isPromise() != oldPromiseState);
                 }
                 // process all the shortcuts
                 return false;
@@ -3174,7 +3160,7 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
         mapOverItems(MAP_RECURSE, new ItemOperator() {
             @Override
             public boolean evaluate(ItemInfo info, View v) {
-                if (info instanceof ShortcutInfo && v instanceof BubbleTextView) {
+                if (info instanceof WorkspaceItemInfo && v instanceof BubbleTextView) {
                     if (!packageUserKey.updateFromItemInfo(info)
                             || updatedDots.test(packageUserKey)) {
                         ((BubbleTextView) v).applyDotState(info, true /* animate */);
@@ -3193,7 +3179,7 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
                 if (info instanceof FolderInfo && folderIds.contains(info.id)
                         && v instanceof FolderIcon) {
                     FolderDotInfo folderDotInfo = new FolderDotInfo();
-                    for (ShortcutInfo si : ((FolderInfo) info).contents) {
+                    for (WorkspaceItemInfo si : ((FolderInfo) info).contents) {
                         folderDotInfo.addDotInfo(mLauncher.getDotInfoForItem(si));
                     }
                     ((FolderIcon) v).setDotInfo(folderDotInfo);
@@ -3216,7 +3202,7 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
         mapOverItems(MAP_RECURSE, new ItemOperator() {
             @Override
             public boolean evaluate(ItemInfo info, View v) {
-                if (info instanceof ShortcutInfo && v instanceof BubbleTextView
+                if (info instanceof WorkspaceItemInfo && v instanceof BubbleTextView
                         && updates.contains(info)) {
                     ((BubbleTextView) v).applyPromiseState(false /* promiseStateChanged */);
                 } else if (v instanceof PendingAppWidgetHostView
@@ -3348,13 +3334,15 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
             LauncherAppWidgetHost host) {
             mInfos = infos;
             mHost = host;
-            mHandler = new Handler();
+            mHandler = mLauncher.mHandler;
             mRefreshPending = true;
 
             mHost.addProviderChangeListener(this);
             // Force refresh after 10 seconds, if we don't get the provider changed event.
             // This could happen when the provider is no longer available in the app.
-            mHandler.postDelayed(this, 10000);
+            Message msg = Message.obtain(mHandler, this);
+            msg.obj = DeferredWidgetRefresh.class;
+            mHandler.sendMessageDelayed(msg, 10000);
         }
 
         @Override

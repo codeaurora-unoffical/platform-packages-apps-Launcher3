@@ -22,6 +22,7 @@ import static com.android.launcher3.config.FeatureFlags.IS_DOGFOOD_BUILD;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ShortcutInfo;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
@@ -48,7 +49,6 @@ import com.android.launcher3.model.PackageUpdatedTask;
 import com.android.launcher3.model.ShortcutsChangedTask;
 import com.android.launcher3.model.UserLockStateChangedTask;
 import com.android.launcher3.shortcuts.DeepShortcutManager;
-import com.android.launcher3.shortcuts.ShortcutInfoCompat;
 import com.android.launcher3.util.ComponentKey;
 import com.android.launcher3.util.IntArray;
 import com.android.launcher3.util.ItemInfoMatcher;
@@ -149,7 +149,7 @@ public class LauncherModel extends BroadcastReceiver
         public void bindAppsAdded(IntArray newScreens,
                 ArrayList<ItemInfo> addNotAnimated, ArrayList<ItemInfo> addAnimated);
         public void bindPromiseAppProgressUpdated(PromiseAppInfo app);
-        public void bindShortcutsChanged(ArrayList<ShortcutInfo> updated, UserHandle user);
+        public void bindWorkspaceItemsChanged(ArrayList<WorkspaceItemInfo> updated);
         public void bindWidgetsRestored(ArrayList<LauncherAppWidgetInfo> widgets);
         public void bindRestoreItemsChange(HashSet<ItemInfo> updates);
         public void bindWorkspaceComponentsRemoved(ItemInfoMatcher matcher);
@@ -206,57 +206,6 @@ public class LauncherModel extends BroadcastReceiver
                 hasVerticalHotseat, verifyChanges);
     }
 
-    static void checkItemInfoLocked(
-            final int itemId, final ItemInfo item, StackTraceElement[] stackTrace) {
-        ItemInfo modelItem = sBgDataModel.itemsIdMap.get(itemId);
-        if (modelItem != null && item != modelItem) {
-            // check all the data is consistent
-            if (modelItem instanceof ShortcutInfo && item instanceof ShortcutInfo) {
-                ShortcutInfo modelShortcut = (ShortcutInfo) modelItem;
-                ShortcutInfo shortcut = (ShortcutInfo) item;
-                if (modelShortcut.title.toString().equals(shortcut.title.toString()) &&
-                        modelShortcut.intent.filterEquals(shortcut.intent) &&
-                        modelShortcut.id == shortcut.id &&
-                        modelShortcut.itemType == shortcut.itemType &&
-                        modelShortcut.container == shortcut.container &&
-                        modelShortcut.screenId == shortcut.screenId &&
-                        modelShortcut.cellX == shortcut.cellX &&
-                        modelShortcut.cellY == shortcut.cellY &&
-                        modelShortcut.spanX == shortcut.spanX &&
-                        modelShortcut.spanY == shortcut.spanY) {
-                    // For all intents and purposes, this is the same object
-                    return;
-                }
-            }
-
-            // the modelItem needs to match up perfectly with item if our model is
-            // to be consistent with the database-- for now, just require
-            // modelItem == item or the equality check above
-            String msg = "item: " + ((item != null) ? item.toString() : "null") +
-                    "modelItem: " +
-                    ((modelItem != null) ? modelItem.toString() : "null") +
-                    "Error: ItemInfo passed to checkItemInfo doesn't match original";
-            RuntimeException e = new RuntimeException(msg);
-            if (stackTrace != null) {
-                e.setStackTrace(stackTrace);
-            }
-            throw e;
-        }
-    }
-
-    static void checkItemInfo(final ItemInfo item) {
-        final StackTraceElement[] stackTrace = new Throwable().getStackTrace();
-        final int itemId = item.id;
-        Runnable r = new Runnable() {
-            public void run() {
-                synchronized (sBgDataModel) {
-                    checkItemInfoLocked(itemId, item, stackTrace);
-                }
-            }
-        };
-        runOnWorkerThread(r);
-    }
-
     /**
      * Set this as the current Launcher activity object for the loader.
      */
@@ -264,6 +213,7 @@ public class LauncherModel extends BroadcastReceiver
         synchronized (mLock) {
             Preconditions.assertUIThread();
             mCallbacks = new WeakReference<>(callbacks);
+            android.util.Log.d("b/131170582", "mCallbacks = " + mCallbacks);
         }
     }
 
@@ -318,12 +268,12 @@ public class LauncherModel extends BroadcastReceiver
     }
 
     @Override
-    public void onShortcutsChanged(String packageName, List<ShortcutInfoCompat> shortcuts,
+    public void onShortcutsChanged(String packageName, List<ShortcutInfo> shortcuts,
             UserHandle user) {
         enqueueModelUpdateTask(new ShortcutsChangedTask(packageName, shortcuts, user, true));
     }
 
-    public void updatePinnedShortcuts(String packageName, List<ShortcutInfoCompat> shortcuts,
+    public void updatePinnedShortcuts(String packageName, List<ShortcutInfo> shortcuts,
             UserHandle user) {
         enqueueModelUpdateTask(new ShortcutsChangedTask(packageName, shortcuts, user, false));
     }
@@ -381,6 +331,7 @@ public class LauncherModel extends BroadcastReceiver
             // Stop any existing loaders first, so they don't set mModelLoaded to true later
             stopLoader();
             mModelLoaded = false;
+            android.util.Log.d("b/131170582", "1 mModelLoaded = " + mModelLoaded);
         }
 
         // Start the loader if launcher is already running, otherwise the loader will run,
@@ -441,6 +392,7 @@ public class LauncherModel extends BroadcastReceiver
         synchronized (mLock) {
             LoaderTask oldTask = mLoaderTask;
             mLoaderTask = null;
+            android.util.Log.d("b/131170582", "1 mLoaderTask = " + mLoaderTask);
             if (oldTask != null) {
                 oldTask.stopLocked();
             }
@@ -451,6 +403,7 @@ public class LauncherModel extends BroadcastReceiver
         synchronized (mLock) {
             stopLoader();
             mLoaderTask = new LoaderTask(mApp, mBgAllAppsList, sBgDataModel, results);
+            android.util.Log.d("b/131170582", "2 mLoaderTask = " + mLoaderTask);
             runOnWorkerThread(mLoaderTask);
         }
     }
@@ -495,6 +448,7 @@ public class LauncherModel extends BroadcastReceiver
                 mTask = task;
                 mIsLoaderTaskRunning = true;
                 mModelLoaded = false;
+                android.util.Log.d("b/131170582", "2 mModelLoaded = " + mModelLoaded);
             }
         }
 
@@ -502,6 +456,7 @@ public class LauncherModel extends BroadcastReceiver
             synchronized (mLock) {
                 // Everything loaded bind the data.
                 mModelLoaded = true;
+                android.util.Log.d("b/131170582", "3 mModelLoaded = " + mModelLoaded);
             }
         }
 
@@ -511,6 +466,7 @@ public class LauncherModel extends BroadcastReceiver
                 // If we are still the last one to be scheduled, remove ourselves.
                 if (mLoaderTask == mTask) {
                     mLoaderTask = null;
+                    android.util.Log.d("b/131170582", "3 mLoaderTask = " + mLoaderTask);
                 }
                 mIsLoaderTaskRunning = false;
             }
@@ -581,8 +537,8 @@ public class LauncherModel extends BroadcastReceiver
 
     }
 
-    public void updateAndBindShortcutInfo(final ShortcutInfo si, final ShortcutInfoCompat info) {
-        updateAndBindShortcutInfo(() -> {
+    public void updateAndBindWorkspaceItem(WorkspaceItemInfo si, ShortcutInfo info) {
+        updateAndBindWorkspaceItem(() -> {
             si.updateFromDeepShortcutInfo(info, mApp.getContext());
             LauncherIcons li = LauncherIcons.obtain(mApp.getContext());
             si.applyFrom(li.createShortcutIcon(info));
@@ -594,15 +550,15 @@ public class LauncherModel extends BroadcastReceiver
     /**
      * Utility method to update a shortcut on the background thread.
      */
-    public void updateAndBindShortcutInfo(final Supplier<ShortcutInfo> shortcutProvider) {
+    public void updateAndBindWorkspaceItem(final Supplier<WorkspaceItemInfo> itemProvider) {
         enqueueModelUpdateTask(new BaseModelUpdateTask() {
             @Override
             public void execute(LauncherAppState app, BgDataModel dataModel, AllAppsList apps) {
-                ShortcutInfo info = shortcutProvider.get();
+                WorkspaceItemInfo info = itemProvider.get();
                 getModelWriter().updateItemInDatabase(info);
-                ArrayList<ShortcutInfo> update = new ArrayList<>();
+                ArrayList<WorkspaceItemInfo> update = new ArrayList<>();
                 update.add(info);
-                bindUpdatedShortcuts(update, info.user);
+                bindUpdatedWorkspaceItems(update);
             }
         });
     }

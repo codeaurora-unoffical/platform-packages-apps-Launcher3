@@ -21,6 +21,9 @@ import static androidx.core.util.Preconditions.checkNotNull;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.database.ContentObserver;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 
 import androidx.annotation.GuardedBy;
@@ -65,9 +68,8 @@ abstract class BaseFlags {
     // When enabled the promise icon is visible in all apps while installation an app.
     public static final boolean LAUNCHER3_PROMISE_APPS_IN_ALL_APPS = false;
 
-    public static final TogglableFlag QSB_ON_FIRST_SCREEN = new TogglableFlag("QSB_ON_FIRST_SCREEN",
-            true,
-            "Enable moving the QSB on the 0th screen of the workspace");
+    // Enable moving the QSB on the 0th screen of the workspace
+    public static final boolean QSB_ON_FIRST_SCREEN = true;
 
     public static final TogglableFlag EXAMPLE_FLAG = new TogglableFlag("EXAMPLE_FLAG", true,
             "An example flag that doesn't do anything. Useful for testing");
@@ -88,10 +90,6 @@ abstract class BaseFlags {
     // trying to make them fit the orientation the device is in.
     public static final boolean OVERVIEW_USE_SCREENSHOT_ORIENTATION = true;
 
-    public static final ToggleableGlobalSettingsFlag STYLE_WALLPAPER
-            = new ToggleableGlobalSettingsFlag("STYLE_WALLPAPER", false,
-            "Direct users to the new ThemePicker based WallpaperPicker");
-
     /**
      * Feature flag to handle define config changes dynamically instead of killing the process.
      */
@@ -101,12 +99,12 @@ abstract class BaseFlags {
     public static final TogglableFlag QUICKSTEP_SPRINGS = new TogglableFlag("QUICKSTEP_SPRINGS",
             false, "Enable springs for quickstep animations");
 
+    public static final TogglableFlag ADAPTIVE_ICON_WINDOW_ANIM = new TogglableFlag(
+            "ADAPTIVE_ICON_WINDOW_ANIM", true,
+            "Use adaptive icons for window animations.");
+
     public static final TogglableFlag ENABLE_QUICKSTEP_LIVE_TILE = new TogglableFlag(
             "ENABLE_QUICKSTEP_LIVE_TILE", false, "Enable live tile in Quickstep overview");
-
-    public static final ToggleableGlobalSettingsFlag SWIPE_HOME
-            = new ToggleableGlobalSettingsFlag("SWIPE_HOME", false,
-            "Swiping up on the nav bar goes home. Swipe and hold goes to recent apps.");
 
     public static final TogglableFlag ENABLE_HINTS_IN_OVERVIEW = new TogglableFlag(
             "ENABLE_HINTS_IN_OVERVIEW", false,
@@ -170,7 +168,7 @@ abstract class BaseFlags {
             currentValue = getFromStorage(context, defaultValue);
         }
 
-        void updateStorage(Context context, boolean value) {
+        public void updateStorage(Context context, boolean value) {
             SharedPreferences.Editor editor = context.getSharedPreferences(FLAGS_PREF_NAME,
                     Context.MODE_PRIVATE).edit();
             if (value == defaultValue) {
@@ -248,11 +246,21 @@ abstract class BaseFlags {
         @Override
         public void initialize(Context context) {
             contentResolver = context.getContentResolver();
+            contentResolver.registerContentObserver(Settings.Global.getUriFor(getKey()), true,
+                    new ContentObserver(new Handler(Looper.getMainLooper())) {
+                        @Override
+                        public void onChange(boolean selfChange) {
+                            superInitialize(context);
+                    }});
+            superInitialize(context);
+        }
+
+        private void superInitialize(Context context) {
             super.initialize(context);
         }
 
         @Override
-        void updateStorage(Context context, boolean value) {
+        public void updateStorage(Context context, boolean value) {
             if (contentResolver == null) {
                 return;
             }
@@ -265,11 +273,6 @@ abstract class BaseFlags {
                 return defaultValue;
             }
             return Settings.Global.getInt(contentResolver, getKey(), defaultValue ? 1 : 0) == 1;
-        }
-
-        @Override
-        public boolean get() {
-            return getFromStorage(null, getDefaultValue());
         }
     }
 }
