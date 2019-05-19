@@ -26,8 +26,8 @@ import androidx.test.runner.AndroidJUnit4;
 
 import com.android.launcher3.Launcher;
 import com.android.launcher3.util.RaceConditionReproducer;
-import com.android.quickstep.QuickStepOnOffRule.Mode;
-import com.android.quickstep.QuickStepOnOffRule.QuickstepOnOff;
+import com.android.quickstep.NavigationModeSwitchRule.Mode;
+import com.android.quickstep.NavigationModeSwitchRule.NavigationModeSwitch;
 
 import org.junit.Before;
 import org.junit.Ignore;
@@ -37,6 +37,9 @@ import org.junit.runner.RunWith;
 @LargeTest
 @RunWith(AndroidJUnit4.class)
 public class StartLauncherViaGestureTests extends AbstractQuickStepTest {
+
+    static final int STRESS_REPEAT_COUNT = 10;
+
     @Override
     @Before
     public void setUp() throws Exception {
@@ -58,8 +61,8 @@ public class StartLauncherViaGestureTests extends AbstractQuickStepTest {
     }
 
     @Test
-    @Ignore // Ignoring until gestural navigation event sequence settles
-    @QuickstepOnOff(mode = Mode.ON)
+    @Ignore // Ignoring until race condition repro framework is changes for multi-process case.
+    @NavigationModeSwitch(mode = Mode.TWO_BUTTON)
     public void testPressHome() {
         runTest(enterEvt(Launcher.ON_CREATE_EVT),
                 exitEvt(Launcher.ON_CREATE_EVT),
@@ -73,10 +76,26 @@ public class StartLauncherViaGestureTests extends AbstractQuickStepTest {
     }
 
     @Test
-    @Ignore // Ignoring until gestural navigation event sequence settles
-    @QuickstepOnOff(mode = Mode.ON)
-    public void testSwipeToOverview() {
-        closeLauncherActivity();
-        mLauncher.getBackground().switchToOverview();
+    @NavigationModeSwitch
+    public void testStressPressHome() {
+        for (int i = 0; i < STRESS_REPEAT_COUNT; ++i) {
+            // Destroy Launcher activity.
+            closeLauncherActivity();
+
+            // The test action.
+            mLauncher.pressHome();
+        }
+    }
+
+    @Test
+    @NavigationModeSwitch
+    public void testStressSwipeToOverview() {
+        for (int i = 0; i < STRESS_REPEAT_COUNT; ++i) {
+            // Destroy Launcher activity.
+            closeLauncherActivity();
+
+            // The test action.
+            mLauncher.getBackground().switchToOverview();
+        }
     }
 }

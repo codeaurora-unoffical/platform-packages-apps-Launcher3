@@ -22,6 +22,7 @@ import static com.android.launcher3.ItemInfoWithIcon.FLAG_DISABLED_SAFEMODE;
 import static com.android.launcher3.ItemInfoWithIcon.FLAG_DISABLED_SUSPENDED;
 import static com.android.launcher3.Launcher.REQUEST_BIND_PENDING_APPWIDGET;
 import static com.android.launcher3.Launcher.REQUEST_RECONFIGURE_APPWIDGET;
+import static com.android.launcher3.model.AppLaunchTracker.CONTAINER_ALL_APPS;
 
 import android.app.AlertDialog;
 import android.content.Intent;
@@ -30,6 +31,8 @@ import android.text.TextUtils;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.widget.Toast;
+
+import androidx.annotation.Nullable;
 
 import com.android.launcher3.AppInfo;
 import com.android.launcher3.BubbleTextView;
@@ -40,7 +43,7 @@ import com.android.launcher3.LauncherAppWidgetInfo;
 import com.android.launcher3.LauncherAppWidgetProviderInfo;
 import com.android.launcher3.PromiseAppInfo;
 import com.android.launcher3.R;
-import com.android.launcher3.ShortcutInfo;
+import com.android.launcher3.WorkspaceItemInfo;
 import com.android.launcher3.compat.AppWidgetManagerCompat;
 import com.android.launcher3.folder.Folder;
 import com.android.launcher3.folder.FolderIcon;
@@ -56,9 +59,21 @@ public class ItemClickHandler {
     /**
      * Instance used for click handling on items
      */
-    public static final OnClickListener INSTANCE = ItemClickHandler::onClick;
+    public static final OnClickListener INSTANCE = getInstance(null);
 
-    private static void onClick(View v) {
+    public static final OnClickListener getInstance(String sourceContainer) {
+        return v -> onClick(v, sourceContainer);
+    }
+
+    private static void onClick(View v, String sourceContainer) {
+        if (com.android.launcher3.TestProtocol.sDebugTracing) {
+            android.util.Log.d(com.android.launcher3.TestProtocol.NO_DRAG_TAG,
+                    "onClick() called with: v = [" + v.getClass().getSimpleName() +
+                            "], sourceContainer = [" +
+                            (sourceContainer != null ?
+                                    sourceContainer.getClass().getSimpleName() : "null")
+                            + "]");
+        }
         // Make sure that rogue clicks don't get through while allapps is launching, or after the
         // view has detached (it's possible for this to happen if the view is removed mid touch).
         if (v.getWindowToken() == null) {
@@ -71,14 +86,15 @@ public class ItemClickHandler {
         }
 
         Object tag = v.getTag();
-        if (tag instanceof ShortcutInfo) {
-            onClickAppShortcut(v, (ShortcutInfo) tag, launcher);
+        if (tag instanceof WorkspaceItemInfo) {
+            onClickAppShortcut(v, (WorkspaceItemInfo) tag, launcher, sourceContainer);
         } else if (tag instanceof FolderInfo) {
             if (v instanceof FolderIcon) {
                 onClickFolderIcon(v);
             }
         } else if (tag instanceof AppInfo) {
-            startAppShortcutOrInfoActivity(v, (AppInfo) tag, launcher);
+            startAppShortcutOrInfoActivity(v, (AppInfo) tag, launcher,
+                    sourceContainer == null ? CONTAINER_ALL_APPS: sourceContainer);
         } else if (tag instanceof LauncherAppWidgetInfo) {
             if (v instanceof PendingAppWidgetHostView) {
                 onClickPendingWidget((PendingAppWidgetHostView) v, launcher);
@@ -154,17 +170,19 @@ public class ItemClickHandler {
     private static void startMarketIntentForPackage(View v, Launcher launcher, String packageName) {
         ItemInfo item = (ItemInfo) v.getTag();
         Intent intent = new PackageManagerHelper(launcher).getMarketIntent(packageName);
-        launcher.startActivitySafely(v, intent, item);
+        launcher.startActivitySafely(v, intent, item, null);
     }
 
     /**
      * Event handler for an app shortcut click.
      *
-     * @param v The view that was clicked. Must be a tagged with a {@link ShortcutInfo}.
+     * @param v The view that was clicked. Must be a tagged with a {@link WorkspaceItemInfo}.
      */
-    public static void onClickAppShortcut(View v, ShortcutInfo shortcut, Launcher launcher) {
+    public static void onClickAppShortcut(View v, WorkspaceItemInfo shortcut, Launcher launcher,
+            @Nullable String sourceContainer) {
         if (shortcut.isDisabled()) {
-            final int disabledFlags = shortcut.runtimeStatusFlags & ShortcutInfo.FLAG_DISABLED_MASK;
+            final int disabledFlags = shortcut.runtimeStatusFlags
+                    & WorkspaceItemInfo.FLAG_DISABLED_MASK;
             if ((disabledFlags &
                     ~FLAG_DISABLED_SUSPENDED &
                     ~FLAG_DISABLED_QUIET_USER) == 0) {
@@ -195,16 +213,17 @@ public class ItemClickHandler {
                     shortcut.intent.getComponent().getPackageName() : shortcut.intent.getPackage();
             if (!TextUtils.isEmpty(packageName)) {
                 onClickPendingAppItem(v, launcher, packageName,
-                        shortcut.hasStatusFlag(ShortcutInfo.FLAG_INSTALL_SESSION_ACTIVE));
+                        shortcut.hasStatusFlag(WorkspaceItemInfo.FLAG_INSTALL_SESSION_ACTIVE));
                 return;
             }
         }
 
         // Start activities
-        startAppShortcutOrInfoActivity(v, shortcut, launcher);
+        startAppShortcutOrInfoActivity(v, shortcut, launcher, sourceContainer);
     }
 
-    private static void startAppShortcutOrInfoActivity(View v, ItemInfo item, Launcher launcher) {
+    private static void startAppShortcutOrInfoActivity(View v, ItemInfo item, Launcher launcher,
+            @Nullable String sourceContainer) {
         Intent intent;
         if (item instanceof PromiseAppInfo) {
             PromiseAppInfo promiseAppInfo = (PromiseAppInfo) item;
@@ -215,9 +234,9 @@ public class ItemClickHandler {
         if (intent == null) {
             throw new IllegalArgumentException("Input must have a valid intent");
         }
-        if (item instanceof ShortcutInfo) {
-            ShortcutInfo si = (ShortcutInfo) item;
-            if (si.hasStatusFlag(ShortcutInfo.FLAG_SUPPORTS_WEB_UI)
+        if (item instanceof WorkspaceItemInfo) {
+            WorkspaceItemInfo si = (WorkspaceItemInfo) item;
+            if (si.hasStatusFlag(WorkspaceItemInfo.FLAG_SUPPORTS_WEB_UI)
                     && Intent.ACTION_VIEW.equals(intent.getAction())) {
                 // make a copy of the intent that has the package set to null
                 // we do this because the platform sometimes disables instant
@@ -227,6 +246,6 @@ public class ItemClickHandler {
                 intent.setPackage(null);
             }
         }
-        launcher.startActivitySafely(v, intent, item);
+        launcher.startActivitySafely(v, intent, item, sourceContainer);
     }
 }

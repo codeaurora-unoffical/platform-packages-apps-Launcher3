@@ -16,6 +16,8 @@
 package com.android.quickstep.util;
 
 import static com.android.launcher3.config.FeatureFlags.ENABLE_QUICKSTEP_LIVE_TILE;
+import static com.android.systemui.shared.system.QuickStepContract.getWindowCornerRadius;
+import static com.android.systemui.shared.system.QuickStepContract.supportsRoundedCornersOnWindows;
 import static com.android.systemui.shared.system.RemoteAnimationTargetCompat.MODE_CLOSING;
 import static com.android.systemui.shared.system.RemoteAnimationTargetCompat.MODE_OPENING;
 
@@ -33,6 +35,7 @@ import com.android.launcher3.BaseDraggingActivity;
 import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.R;
 import com.android.launcher3.Utilities;
+import com.android.launcher3.util.Themes;
 import com.android.launcher3.views.BaseDragLayer;
 import com.android.quickstep.RecentsModel;
 import com.android.quickstep.views.RecentsView;
@@ -97,12 +100,9 @@ public class ClipAnimationHelper {
             (t, a1) -> a1;
 
     public ClipAnimationHelper(Context context) {
-        mWindowCornerRadius = RecentsModel.INSTANCE.get(context).getWindowCornerRadius();
-        mSupportsRoundedCornersOnWindows = RecentsModel.INSTANCE.get(context)
-                .supportsRoundedCornersOnWindows();
-        int taskCornerRadiusRes = mSupportsRoundedCornersOnWindows ?
-                R.dimen.task_corner_radius : R.dimen.task_corner_radius_small;
-        mTaskCornerRadius = context.getResources().getDimension(taskCornerRadiusRes);
+        mWindowCornerRadius = getWindowCornerRadius(context.getResources());
+        mSupportsRoundedCornersOnWindows = supportsRoundedCornersOnWindows(context.getResources());
+        mTaskCornerRadius = TaskCornerRadius.get(context);
     }
 
     private void updateSourceStack(RemoteAnimationTargetCompat target) {
@@ -149,6 +149,11 @@ public class ClipAnimationHelper {
     }
 
     public RectF applyTransform(RemoteAnimationTargetSet targetSet, TransformParams params) {
+        return applyTransform(targetSet, params, true /* launcherOnTop */);
+    }
+
+    public RectF applyTransform(RemoteAnimationTargetSet targetSet, TransformParams params,
+            boolean launcherOnTop) {
         if (params.currentRect == null) {
             RectF currentRect;
             mTmpRectF.set(mTargetRect);
@@ -185,10 +190,11 @@ public class ClipAnimationHelper {
                     if (mSupportsRoundedCornersOnWindows) {
                         cornerRadius = Utilities.mapRange(params.progress, mWindowCornerRadius,
                                 mTaskCornerRadius);
+                        mCurrentCornerRadius = cornerRadius;
                     }
                 }
                 alpha = mTaskAlphaCallback.apply(app, params.targetAlpha);
-            } else if (ENABLE_QUICKSTEP_LIVE_TILE.get()) {
+            } else if (ENABLE_QUICKSTEP_LIVE_TILE.get() && launcherOnTop) {
                 crop = null;
                 layer = Integer.MAX_VALUE;
             }

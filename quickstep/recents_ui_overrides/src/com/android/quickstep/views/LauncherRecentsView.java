@@ -19,9 +19,9 @@ import static com.android.launcher3.LauncherState.ALL_APPS;
 import static com.android.launcher3.LauncherState.ALL_APPS_HEADER_EXTRA;
 import static com.android.launcher3.LauncherState.NORMAL;
 import static com.android.launcher3.LauncherState.OVERVIEW;
+import static com.android.launcher3.LauncherState.RECENTS_CLEAR_ALL_BUTTON;
 import static com.android.launcher3.QuickstepAppTransitionManagerImpl.ALL_APPS_PROGRESS_OFF_SCREEN;
 import static com.android.launcher3.allapps.AllAppsTransitionController.ALL_APPS_PROGRESS;
-import static com.android.launcher3.config.FeatureFlags.ENABLE_HINTS_IN_OVERVIEW;
 import static com.android.launcher3.config.FeatureFlags.ENABLE_QUICKSTEP_LIVE_TILE;
 
 import android.animation.AnimatorSet;
@@ -32,19 +32,17 @@ import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.os.Build;
 import android.util.AttributeSet;
-import android.util.FloatProperty;
 import android.view.View;
-import android.view.ViewDebug;
 
 import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.Launcher;
 import com.android.launcher3.LauncherState;
 import com.android.launcher3.R;
 import com.android.launcher3.anim.Interpolators;
-import com.android.launcher3.util.PendingAnimation;
+import com.android.launcher3.appprediction.PredictionUiStateManager;
+import com.android.launcher3.appprediction.PredictionUiStateManager.Client;
 import com.android.launcher3.views.ScrimView;
-import com.android.quickstep.OverviewInteractionState;
-import com.android.quickstep.hints.HintsContainer;
+import com.android.quickstep.SysUINavigationMode;
 import com.android.quickstep.util.ClipAnimationHelper;
 import com.android.quickstep.util.ClipAnimationHelper.TransformParams;
 import com.android.quickstep.util.LayoutUtils;
@@ -55,29 +53,7 @@ import com.android.quickstep.util.LayoutUtils;
 @TargetApi(Build.VERSION_CODES.O)
 public class LauncherRecentsView extends RecentsView<Launcher> {
 
-    public static final FloatProperty<LauncherRecentsView> TRANSLATION_Y_FACTOR =
-            new FloatProperty<LauncherRecentsView>("translationYFactor") {
-
-                @Override
-                public void setValue(LauncherRecentsView view, float v) {
-                    view.setTranslationYFactor(v);
-                }
-
-                @Override
-                public Float get(LauncherRecentsView view) {
-                    return view.mTranslationYFactor;
-                }
-            };
-
-    /**
-     * A ratio representing the view's relative placement within its padded space. For example, 0
-     * is top aligned and 0.5 is centered vertically.
-     */
-    @ViewDebug.ExportedProperty(category = "launcher")
-    private float mTranslationYFactor;
-
     private final TransformParams mTransformParams = new TransformParams();
-    private HintsContainer mHintsContainer;
 
     public LauncherRecentsView(Context context) {
         this(context, null);
@@ -94,45 +70,17 @@ public class LauncherRecentsView extends RecentsView<Launcher> {
 
     @Override
     public void startHome() {
-        if (ENABLE_QUICKSTEP_LIVE_TILE.get()) {
-            takeScreenshotAndFinishRecentsAnimation(true,
-                    () -> mActivity.getStateManager().goToState(NORMAL));
-        } else {
-            mActivity.getStateManager().goToState(NORMAL);
-        }
+        mActivity.getStateManager().goToState(NORMAL);
     }
 
     @Override
-    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-        super.onLayout(changed, left, top, right, bottom);
-        setTranslationYFactor(mTranslationYFactor);
-    }
-
-    @Override
-    protected void onAttachedToWindow() {
-        super.onAttachedToWindow();
-        mHintsContainer = mActivity.findViewById(R.id.hints);
-        mHintsContainer.setPadding(0, 0, 0, mActivity.getDeviceProfile().chipHintBottomMarginPx);
-    }
-
-    public void setTranslationYFactor(float translationFactor) {
-        mTranslationYFactor = translationFactor;
-        setTranslationY(computeTranslationYForFactor(mTranslationYFactor));
+    public void setTranslationY(float translationY) {
+        super.setTranslationY(translationY);
         if (ENABLE_QUICKSTEP_LIVE_TILE.get()) {
             LauncherState state = mActivity.getStateManager().getState();
             if (state == OVERVIEW || state == ALL_APPS) {
                 redrawLiveTile(false);
             }
-        }
-    }
-
-    public float computeTranslationYForFactor(float translationYFactor) {
-        return translationYFactor * (getPaddingBottom() - getPaddingTop());
-    }
-
-    public void setHintVisibility(float v) {
-        if (mHintsContainer != null && ENABLE_HINTS_IN_OVERVIEW.get()) {
-            mHintsContainer.setHintVisibility(v);
         }
     }
 
@@ -162,7 +110,7 @@ public class LauncherRecentsView extends RecentsView<Launcher> {
             ClipAnimationHelper helper) {
         AnimatorSet anim = super.createAdjacentPageAnimForTaskLaunch(tv, helper);
 
-        if (!OverviewInteractionState.INSTANCE.get(mActivity).isSwipeUpGestureEnabled()) {
+        if (!SysUINavigationMode.getMode(mActivity).hasGestures) {
             // Hotseat doesn't move when opening recents with the button,
             // so don't animate it here either.
             return anim;
@@ -182,37 +130,6 @@ public class LauncherRecentsView extends RecentsView<Launcher> {
                 mActivity.findViewById(R.id.scrim_view), ScrimView.DRAG_HANDLE_ALPHA, 0);
         dragHandleAnim.setInterpolator(Interpolators.ACCEL_2);
         anim.play(dragHandleAnim);
-
-        return anim;
-    }
-
-    @Override
-    public PendingAnimation createTaskLauncherAnimation(TaskView tv, long duration) {
-        PendingAnimation anim = super.createTaskLauncherAnimation(tv, duration);
-
-        if (ENABLE_HINTS_IN_OVERVIEW.get()) {
-            anim.anim.play(ObjectAnimator.ofFloat(
-                    mHintsContainer, HintsContainer.HINT_VISIBILITY, 0));
-        }
-
-        return anim;
-    }
-
-    @Override
-    public PendingAnimation createTaskDismissAnimation(TaskView taskView, boolean animateTaskView,
-            boolean shouldRemoveTask, long duration) {
-        PendingAnimation anim = super.createTaskDismissAnimation(taskView, animateTaskView,
-                shouldRemoveTask, duration);
-
-        if (ENABLE_HINTS_IN_OVERVIEW.get()) {
-            anim.anim.play(ObjectAnimator.ofFloat(
-                    mHintsContainer, HintsContainer.HINT_VISIBILITY, 0));
-            anim.addEndListener(onEndListener -> {
-                if (!onEndListener.isSuccess) {
-                    mHintsContainer.setHintVisibility(1);
-                }
-            });
-        }
 
         return anim;
     }
@@ -277,6 +194,26 @@ public class LauncherRecentsView extends RecentsView<Launcher> {
                 mClipAnimationHelper.applyTransform(mRecentsAnimationWrapper.targetSet,
                         mTransformParams);
             }
+        }
+    }
+
+    @Override
+    public void reset() {
+        super.reset();
+
+        // We are moving to home or some other UI with no recents. Switch back to the home client,
+        // the home predictions should have been updated when the activity was resumed.
+        PredictionUiStateManager.INSTANCE.get(getContext()).switchClient(Client.HOME);
+    }
+
+    @Override
+    public void setOverviewStateEnabled(boolean enabled) {
+        super.setOverviewStateEnabled(enabled);
+        if (enabled) {
+            LauncherState state = mActivity.getStateManager().getState();
+            boolean hasClearAllButton = (state.getVisibleElements(mActivity)
+                    & RECENTS_CLEAR_ALL_BUTTON) != 0;
+            setDisallowScrollToClearAll(!hasClearAllButton);
         }
     }
 }

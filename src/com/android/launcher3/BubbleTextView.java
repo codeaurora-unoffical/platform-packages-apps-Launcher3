@@ -215,11 +215,11 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver, 
         mDotScaleAnim.start();
     }
 
-    public void applyFromShortcutInfo(ShortcutInfo info) {
-        applyFromShortcutInfo(info, false);
+    public void applyFromWorkspaceItem(WorkspaceItemInfo info) {
+        applyFromWorkspaceItem(info, false);
     }
 
-    public void applyFromShortcutInfo(ShortcutInfo info, boolean promiseStateChanged) {
+    public void applyFromWorkspaceItem(WorkspaceItemInfo info, boolean promiseStateChanged) {
         applyIconAndLabel(info);
         setTag(info);
         if (promiseStateChanged || (info.hasPromiseIconUi())) {
@@ -232,7 +232,7 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver, 
     public void applyFromApplicationInfo(AppInfo info) {
         applyIconAndLabel(info);
 
-        // We don't need to check the info since it's not a ShortcutInfo
+        // We don't need to check the info since it's not a WorkspaceItemInfo
         super.setTag(info);
 
         // Verify high res immediately
@@ -247,7 +247,7 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver, 
 
     public void applyFromPackageItemInfo(PackageItemInfo info) {
         applyIconAndLabel(info);
-        // We don't need to check the info since it's not a ShortcutInfo
+        // We don't need to check the info since it's not a WorkspaceItemInfo
         super.setTag(info);
 
         // Verify high res immediately
@@ -273,14 +273,6 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver, 
      */
     public void setLongPressTimeoutFactor(float longPressTimeoutFactor) {
         mLongPressHelper.setLongPressTimeoutFactor(longPressTimeoutFactor);
-    }
-
-    @Override
-    public void setTag(Object tag) {
-        if (tag != null) {
-            LauncherModel.checkItemInfo((ItemInfo) tag);
-        }
-        super.setTag(tag);
     }
 
     @Override
@@ -499,11 +491,11 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver, 
     }
 
     public void applyPromiseState(boolean promiseStateChanged) {
-        if (getTag() instanceof ShortcutInfo) {
-            ShortcutInfo info = (ShortcutInfo) getTag();
+        if (getTag() instanceof WorkspaceItemInfo) {
+            WorkspaceItemInfo info = (WorkspaceItemInfo) getTag();
             final boolean isPromise = info.hasPromiseIconUi();
             final int progressLevel = isPromise ?
-                    ((info.hasStatusFlag(ShortcutInfo.FLAG_INSTALL_SESSION_ACTIVE) ?
+                    ((info.hasStatusFlag(WorkspaceItemInfo.FLAG_INSTALL_SESSION_ACTIVE) ?
                             info.getInstallProgress() : 0)) : 100;
 
             PreloadIconDrawable preloadDrawable = applyProgressLevel(progressLevel);
@@ -627,8 +619,8 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver, 
 
             if (info instanceof AppInfo) {
                 applyFromApplicationInfo((AppInfo) info);
-            } else if (info instanceof ShortcutInfo) {
-                applyFromShortcutInfo((ShortcutInfo) info);
+            } else if (info instanceof WorkspaceItemInfo) {
+                applyFromWorkspaceItem((WorkspaceItemInfo) info);
                 mActivity.invalidateParent(info);
             } else if (info instanceof PackageItemInfo) {
                 applyFromPackageItemInfo((PackageItemInfo) info);

@@ -30,15 +30,12 @@ import android.view.MotionEvent;
 
 import com.android.systemui.shared.recents.IOverviewProxy;
 import com.android.systemui.shared.recents.ISystemUiProxy;
-import com.android.systemui.shared.system.NavigationBarCompat.HitTarget;
 
 /**
  * Service connected by system-UI for handling touch interaction.
  */
 @TargetApi(Build.VERSION_CODES.O)
 public class TouchInteractionService extends Service {
-
-    public static final int EDGE_NAV_BAR = 1 << 8;
 
     private static final String TAG = "TouchInteractionService";
 
@@ -75,6 +72,24 @@ public class TouchInteractionService extends Service {
         @Override
         public void onTip(int actionType, int viewType) {
             mOverviewCommandHelper.onTip(actionType, viewType);
+        }
+
+        @Override
+        public void onAssistantAvailable(boolean available) {
+            // TODO handle assistant
+        }
+
+        @Override
+        public void onAssistantVisibilityChanged(float visibility) {
+            // TODO handle assistant
+        }
+
+        public void onBackAction(boolean completed, int downX, int downY, boolean isButton,
+                boolean gestureSwipeLeft) {
+        }
+
+        public void onSystemUiStateChanged(int stateFlags) {
+            // To be implemented
         }
 
         /** Deprecated methods **/

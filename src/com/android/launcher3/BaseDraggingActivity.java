@@ -32,9 +32,12 @@ import android.widget.Toast;
 
 import com.android.launcher3.LauncherSettings.Favorites;
 import com.android.launcher3.compat.LauncherAppsCompat;
+import com.android.launcher3.model.AppLaunchTracker;
 import com.android.launcher3.shortcuts.DeepShortcutManager;
 import com.android.launcher3.uioverrides.DisplayRotationListener;
 import com.android.launcher3.uioverrides.WallpaperColorInfo;
+
+import androidx.annotation.Nullable;
 
 /**
  * Extension of BaseActivity allowing support for drag-n-drop
@@ -148,7 +151,8 @@ public abstract class BaseDraggingActivity extends BaseActivity
 
     public abstract ActivityOptions getActivityLaunchOptions(View v);
 
-    public boolean startActivitySafely(View v, Intent intent, ItemInfo item) {
+    public boolean startActivitySafely(View v, Intent intent, @Nullable ItemInfo item,
+            @Nullable String sourceContainer) {
         if (mIsSafeModeEnabled && !Utilities.isSystemApp(this, intent)) {
             Toast.makeText(this, R.string.safemode_shortcut_error, Toast.LENGTH_SHORT).show();
             return false;
@@ -163,19 +167,23 @@ public abstract class BaseDraggingActivity extends BaseActivity
             intent.setSourceBounds(getViewBounds(v));
         }
         try {
-            boolean isShortcut = (item instanceof ShortcutInfo)
+            boolean isShortcut = (item instanceof WorkspaceItemInfo)
                     && (item.itemType == Favorites.ITEM_TYPE_SHORTCUT
                     || item.itemType == Favorites.ITEM_TYPE_DEEP_SHORTCUT)
-                    && !((ShortcutInfo) item).isPromise();
+                    && !((WorkspaceItemInfo) item).isPromise();
             if (isShortcut) {
                 // Shortcuts need some special checks due to legacy reasons.
-                startShortcutIntentSafely(intent, optsBundle, item);
+                startShortcutIntentSafely(intent, optsBundle, item, sourceContainer);
             } else if (user == null || user.equals(Process.myUserHandle())) {
                 // Could be launching some bookkeeping activity
                 startActivity(intent, optsBundle);
+                AppLaunchTracker.INSTANCE.get(this).onStartApp(intent.getComponent(),
+                        Process.myUserHandle(), sourceContainer);
             } else {
                 LauncherAppsCompat.getInstance(this).startActivityForProfile(
                         intent.getComponent(), user, intent.getSourceBounds(), optsBundle);
+                AppLaunchTracker.INSTANCE.get(this).onStartApp(intent.getComponent(), user,
+                        sourceContainer);
             }
             getUserEventDispatcher().logAppLaunch(v, intent);
             getStatsLogManager().logAppLaunch(v, intent);
@@ -187,7 +195,8 @@ public abstract class BaseDraggingActivity extends BaseActivity
         return false;
     }
 
-    private void startShortcutIntentSafely(Intent intent, Bundle optsBundle, ItemInfo info) {
+    private void startShortcutIntentSafely(Intent intent, Bundle optsBundle, ItemInfo info,
+            @Nullable String sourceContainer) {
         try {
             StrictMode.VmPolicy oldPolicy = StrictMode.getVmPolicy();
             try {
@@ -198,10 +207,12 @@ public abstract class BaseDraggingActivity extends BaseActivity
                         .penaltyLog().build());
 
                 if (info.itemType == LauncherSettings.Favorites.ITEM_TYPE_DEEP_SHORTCUT) {
-                    String id = ((ShortcutInfo) info).getDeepShortcutId();
+                    String id = ((WorkspaceItemInfo) info).getDeepShortcutId();
                     String packageName = intent.getPackage();
                     DeepShortcutManager.getInstance(this).startShortcut(
                             packageName, id, intent.getSourceBounds(), optsBundle, info.user);
+                    AppLaunchTracker.INSTANCE.get(this).onStartShortcut(packageName, id, info.user,
+                            sourceContainer);
                 } else {
                     // Could be launching some bookkeeping activity
                     startActivity(intent, optsBundle);
