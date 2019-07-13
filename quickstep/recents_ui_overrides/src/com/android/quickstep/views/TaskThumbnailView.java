@@ -252,7 +252,7 @@ public class TaskThumbnailView extends View {
         }
     }
 
-    protected TaskView getTaskView() {
+    public TaskView getTaskView() {
         return (TaskView) getParent();
     }
 
@@ -367,8 +367,11 @@ public class TaskThumbnailView extends View {
         }
 
         mRotated = isRotated;
-        updateOverlay();
         invalidate();
+
+        // Update can be called from {@link #onSizeChanged} during layout, post handling of overlay
+        // as overlay could modify the views in the overlay as a side effect of its update.
+        post(this::updateOverlay);
     }
 
     @Override

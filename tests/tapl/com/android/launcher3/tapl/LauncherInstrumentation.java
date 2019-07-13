@@ -122,7 +122,7 @@ public final class LauncherInstrumentation {
     private static final String APPS_RES_ID = "apps_view";
     private static final String OVERVIEW_RES_ID = "overview_panel";
     private static final String WIDGETS_RES_ID = "widgets_list_view";
-    public static final int WAIT_TIME_MS = 10000;
+    public static final int WAIT_TIME_MS = 60000;
     private static final String SYSTEMUI_PACKAGE = "com.android.systemui";
 
     private static WeakReference<VisibleContainer> sActiveContainer = new WeakReference<>(null);
@@ -208,14 +208,10 @@ public final class LauncherInstrumentation {
             // app context are not constructed with resources that take overlays into account
             final Context ctx = baseContext.createPackageContext("android", 0);
             for (int i = 0; i < 100; ++i) {
-                log("Interaction mode = " + getCurrentInteractionMode(ctx));
-                if (isGesturalMode(ctx)) {
-                    return NavigationModel.ZERO_BUTTON;
-                } else if (isSwipeUpMode(ctx)) {
-                    return NavigationModel.TWO_BUTTON;
-                } else if (isLegacyMode(ctx)) {
-                    return NavigationModel.THREE_BUTTON;
-                }
+                final int currentInteractionMode = getCurrentInteractionMode(ctx);
+                final NavigationModel model = getNavigationModel(currentInteractionMode);
+                log("Interaction mode = " + currentInteractionMode + " (" + model + ")");
+                if (model != null) return model;
                 Thread.sleep(100);
             }
             fail("Can't detect navigation mode");
@@ -223,6 +219,17 @@ public final class LauncherInstrumentation {
             fail(e.toString());
         }
         return NavigationModel.THREE_BUTTON;
+    }
+
+    public static NavigationModel getNavigationModel(int currentInteractionMode) {
+        if (QuickStepContract.isGesturalMode(currentInteractionMode)) {
+            return NavigationModel.ZERO_BUTTON;
+        } else if (QuickStepContract.isSwipeUpMode(currentInteractionMode)) {
+            return NavigationModel.TWO_BUTTON;
+        } else if (QuickStepContract.isLegacyMode(currentInteractionMode)) {
+            return NavigationModel.THREE_BUTTON;
+        }
+        return null;
     }
 
     public static boolean isAvd() {
@@ -292,6 +299,12 @@ public final class LauncherInstrumentation {
         }
     }
 
+    void assertEquals(String message, long expected, long actual) {
+        if (expected != actual) {
+            fail(message + " expected: " + expected + " but was: " + actual);
+        }
+    }
+
     void assertNotEquals(String message, int unexpected, int actual) {
         if (unexpected == actual) {
             failEquals(message, actual);
@@ -302,25 +315,37 @@ public final class LauncherInstrumentation {
         mExpectedRotation = expectedRotation;
     }
 
-    private UiObject2 verifyContainerType(ContainerType containerType) {
-        assertEquals("Unexpected display rotation",
-                mExpectedRotation, mDevice.getDisplayRotation());
+    public String getNavigationModeMismatchError() {
         final NavigationModel navigationModel = getNavigationModel();
         final boolean hasRecentsButton = hasSystemUiObject("recent_apps");
         final boolean hasHomeButton = hasSystemUiObject("home");
-        assertTrue("Presence of recents button doesn't match the interaction mode, mode="
-                        + navigationModel.name() + ", hasRecents=" + hasRecentsButton,
-                (navigationModel == NavigationModel.THREE_BUTTON) == hasRecentsButton);
-        assertTrue("Presence of home button doesn't match the interaction mode, mode="
-                        + navigationModel.name() + ", hasHome=" + hasHomeButton,
-                (navigationModel != NavigationModel.ZERO_BUTTON) == hasHomeButton);
+        if ((navigationModel == NavigationModel.THREE_BUTTON) != hasRecentsButton) {
+            return "Presence of recents button doesn't match the interaction mode, mode="
+                    + navigationModel.name() + ", hasRecents=" + hasRecentsButton;
+        }
+        if ((navigationModel != NavigationModel.ZERO_BUTTON) != hasHomeButton) {
+            return "Presence of home button doesn't match the interaction mode, mode="
+                    + navigationModel.name() + ", hasHome=" + hasHomeButton;
+        }
+        return null;
+    }
+
+    private UiObject2 verifyContainerType(ContainerType containerType) {
+        assertEquals("Unexpected display rotation",
+                mExpectedRotation, mDevice.getDisplayRotation());
+        final String error = getNavigationModeMismatchError();
+        assertTrue(error, error == null);
         log("verifyContainerType: " + containerType);
 
         try (Closable c = addContextLayer(
                 "but the current state is not " + containerType.name())) {
             switch (containerType) {
                 case WORKSPACE: {
-                    waitForLauncherObject(APPS_RES_ID);
+                    if (mDevice.isNaturalOrientation()) {
+                        waitForLauncherObject(APPS_RES_ID);
+                    } else {
+                        waitUntilGone(APPS_RES_ID);
+                    }
                     waitUntilGone(OVERVIEW_RES_ID);
                     waitUntilGone(WIDGETS_RES_ID);
                     return waitForLauncherObject(WORKSPACE_RES_ID);
@@ -477,6 +502,13 @@ public final class LauncherInstrumentation {
         }
     }
 
+    @NonNull
+    public AddToHomeScreenPrompt getAddToHomeScreenPrompt() {
+        try (LauncherInstrumentation.Closable c = addContextLayer("want to get widget cell")) {
+            return new AddToHomeScreenPrompt(this);
+        }
+    }
+
     /**
      * Gets the Overview object if the current state is showing the overview panel. Fails if the
      * launcher is not in that state.
@@ -488,17 +520,6 @@ public final class LauncherInstrumentation {
         try (LauncherInstrumentation.Closable c = addContextLayer("want to get overview")) {
             return new Overview(this);
         }
-    }
-
-    /**
-     * Gets the Base overview object if either Launcher is in overview state or the fallback
-     * overview activity is showing. Fails otherwise.
-     *
-     * @return BaseOverview object.
-     */
-    @NonNull
-    public BaseOverview getBaseOverview() {
-        return new BaseOverview(this);
     }
 
     /**
@@ -592,6 +613,16 @@ public final class LauncherInstrumentation {
     }
 
     @NonNull
+    UiObject2 waitForLauncherObject(BySelector selector) {
+        return waitForObjectBySelector(selector.pkg(getLauncherPackageName()));
+    }
+
+    @NonNull
+    UiObject2 tryWaitForLauncherObject(BySelector selector, long timeout) {
+        return tryWaitForObjectBySelector(selector.pkg(getLauncherPackageName()), timeout);
+    }
+
+    @NonNull
     UiObject2 waitForFallbackLauncherObject(String resName) {
         return waitForObjectBySelector(getFallbackLauncherObjectSelector(resName));
     }
@@ -600,6 +631,10 @@ public final class LauncherInstrumentation {
         final UiObject2 object = mDevice.wait(Until.findObject(selector), WAIT_TIME_MS);
         assertNotNull("Can't find a launcher object; selector: " + selector, object);
         return object;
+    }
+
+    private UiObject2 tryWaitForObjectBySelector(BySelector selector, long timeout) {
+        return mDevice.wait(Until.findObject(selector), timeout);
     }
 
     BySelector getLauncherObjectSelector(String resName) {
@@ -675,7 +710,7 @@ public final class LauncherInstrumentation {
 
     // Inject a swipe gesture. Inject exactly 'steps' motion points, incrementing event time by a
     // fixed interval each time.
-    private void linearGesture(int startX, int startY, int endX, int endY, int steps) {
+    void linearGesture(int startX, int startY, int endX, int endY, int steps) {
         final long downTime = SystemClock.uptimeMillis();
         final Point start = new Point(startX, startY);
         final Point end = new Point(endX, endY);
@@ -742,19 +777,7 @@ public final class LauncherInstrumentation {
         return currentTime;
     }
 
-    public static boolean isGesturalMode(Context context) {
-        return QuickStepContract.isGesturalMode(getCurrentInteractionMode(context));
-    }
-
-    public static boolean isSwipeUpMode(Context context) {
-        return QuickStepContract.isSwipeUpMode(getCurrentInteractionMode(context));
-    }
-
-    public static boolean isLegacyMode(Context context) {
-        return QuickStepContract.isLegacyMode(getCurrentInteractionMode(context));
-    }
-
-    private static int getCurrentInteractionMode(Context context) {
+    public static int getCurrentInteractionMode(Context context) {
         return getSystemIntegerRes(context, "config_navBarInteractionMode");
     }
 
