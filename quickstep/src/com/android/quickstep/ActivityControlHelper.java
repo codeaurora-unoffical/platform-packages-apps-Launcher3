@@ -53,6 +53,7 @@ public interface ActivityControlHelper<T extends BaseDraggingActivity> {
 
     void onSwipeUpToRecentsComplete(T activity);
 
+    default void onSwipeUpToHomeComplete(T activity) { }
     void onAssistantVisibilityChanged(float visibility);
 
     @NonNull HomeAnimationFactory prepareHomeUI(T activity);
@@ -91,6 +92,10 @@ public interface ActivityControlHelper<T extends BaseDraggingActivity> {
     int getContainerType();
 
     boolean isInLiveTileMode();
+
+    void onLaunchTaskFailed(T activity);
+
+    void onLaunchTaskSuccess(T activity);
 
     interface ActivityInitListener {
 

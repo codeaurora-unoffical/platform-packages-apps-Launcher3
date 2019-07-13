@@ -16,9 +16,13 @@
 
 package com.android.quickstep.views;
 
+import static androidx.dynamicanimation.animation.DynamicAnimation.MIN_VISIBLE_CHANGE_PIXELS;
+
 import static com.android.launcher3.BaseActivity.STATE_HANDLER_INVISIBILITY_FLAGS;
 import static com.android.launcher3.InvariantDeviceProfile.CHANGE_FLAG_ICON_PARAMS;
 import static com.android.launcher3.LauncherAnimUtils.SCALE_PROPERTY;
+import static com.android.launcher3.LauncherAnimUtils.VIEW_TRANSLATE_X;
+import static com.android.launcher3.LauncherAnimUtils.VIEW_TRANSLATE_Y;
 import static com.android.launcher3.Utilities.EDGE_NAV_BAR;
 import static com.android.launcher3.Utilities.squaredHypot;
 import static com.android.launcher3.Utilities.squaredTouchSlop;
@@ -79,7 +83,6 @@ import com.android.launcher3.BaseActivity;
 import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.Insettable;
 import com.android.launcher3.InvariantDeviceProfile;
-import com.android.launcher3.LauncherAnimUtils.ViewProgressProperty;
 import com.android.launcher3.LauncherState;
 import com.android.launcher3.PagedView;
 import com.android.launcher3.R;
@@ -123,10 +126,6 @@ public abstract class RecentsView<T extends BaseActivity> extends PagedView impl
         InvariantDeviceProfile.OnIDPChangeListener, TaskThumbnailChangeListener {
 
     private static final String TAG = RecentsView.class.getSimpleName();
-
-    public static final float SPRING_MIN_VISIBLE_CHANGE = 0.001f;
-    public static final float SPRING_DAMPING_RATIO = SpringForce.DAMPING_RATIO_MEDIUM_BOUNCY;
-    public static final float SPRING_STIFFNESS = SpringForce.STIFFNESS_MEDIUM;
 
     public static final FloatProperty<RecentsView> CONTENT_ALPHA =
             new FloatProperty<RecentsView>("contentAlpha") {
@@ -351,6 +350,9 @@ public abstract class RecentsView<T extends BaseActivity> extends PagedView impl
                 .getDimensionPixelSize(R.dimen.recents_empty_message_text_padding);
         setWillNotDraw(false);
         updateEmptyMessage();
+
+        // Initialize quickstep specific cache params here, as this is constructed only once
+        mActivity.getViewCache().setCacheSize(R.layout.digital_wellbeing_toast, 5);
     }
 
     public OverScroller getScroller() {
@@ -518,6 +520,10 @@ public abstract class RecentsView<T extends BaseActivity> extends PagedView impl
 
 
         // Do not let touch escape to siblings below this view.
+        return isHandlingTouch() || shouldStealTouchFromSiblingsBelow(ev);
+    }
+
+    protected boolean shouldStealTouchFromSiblingsBelow(MotionEvent ev) {
         return true;
     }
 
@@ -892,7 +898,7 @@ public abstract class RecentsView<T extends BaseActivity> extends PagedView impl
         mRunningTaskTileHidden = isHidden;
         TaskView runningTask = getRunningTaskView();
         if (runningTask != null) {
-            runningTask.setAlpha(isHidden ? 0 : mContentAlpha);
+            runningTask.setStableAlpha(isHidden ? 0 : mContentAlpha);
         }
     }
 
@@ -1024,9 +1030,10 @@ public abstract class RecentsView<T extends BaseActivity> extends PagedView impl
     private void addDismissedTaskAnimations(View taskView, AnimatorSet anim, long duration) {
         addAnim(ObjectAnimator.ofFloat(taskView, ALPHA, 0), duration, ACCEL_2, anim);
         if (QUICKSTEP_SPRINGS.get() && taskView instanceof TaskView)
-            addAnim(new SpringObjectAnimator<>(new ViewProgressProperty(taskView,
-                            View.TRANSLATION_Y), "taskViewTransY", SPRING_MIN_VISIBLE_CHANGE,
-                            SPRING_DAMPING_RATIO, SPRING_STIFFNESS, 0, -taskView.getHeight()),
+            addAnim(new SpringObjectAnimator<>(taskView, VIEW_TRANSLATE_Y,
+                            MIN_VISIBLE_CHANGE_PIXELS, SpringForce.DAMPING_RATIO_MEDIUM_BOUNCY,
+                            SpringForce.STIFFNESS_MEDIUM,
+                            0, -taskView.getHeight()),
                     duration, LINEAR, anim);
         else {
             addAnim(ObjectAnimator.ofFloat(taskView, TRANSLATION_Y, -taskView.getHeight()),
@@ -1102,10 +1109,10 @@ public abstract class RecentsView<T extends BaseActivity> extends PagedView impl
                 int scrollDiff = newScroll[i] - oldScroll[i] + offset;
                 if (scrollDiff != 0) {
                     if (QUICKSTEP_SPRINGS.get() && child instanceof TaskView) {
-                        addAnim(new SpringObjectAnimator<>(
-                                new ViewProgressProperty(child, View.TRANSLATION_X),
-                                "taskViewTransX", SPRING_MIN_VISIBLE_CHANGE, SPRING_DAMPING_RATIO,
-                                SPRING_STIFFNESS, 0, scrollDiff), duration, ACCEL, anim);
+                        addAnim(new SpringObjectAnimator<>(child, VIEW_TRANSLATE_X,
+                                MIN_VISIBLE_CHANGE_PIXELS, SpringForce.DAMPING_RATIO_MEDIUM_BOUNCY,
+                                SpringForce.STIFFNESS_MEDIUM,
+                                0, scrollDiff), duration, ACCEL, anim);
                     } else {
                         addAnim(ObjectAnimator.ofFloat(child, TRANSLATION_X, scrollDiff), duration,
                                 ACCEL, anim);
@@ -1294,7 +1301,7 @@ public abstract class RecentsView<T extends BaseActivity> extends PagedView impl
         for (int i = getTaskViewCount() - 1; i >= 0; i--) {
             TaskView child = getTaskViewAt(i);
             if (!mRunningTaskTileHidden || child.getTask().key.id != mRunningTaskId) {
-                getChildAt(i).setAlpha(alpha);
+                child.setStableAlpha(alpha);
             }
         }
         mClearAllButton.setContentAlpha(mContentAlpha);
@@ -1674,6 +1681,16 @@ public abstract class RecentsView<T extends BaseActivity> extends PagedView impl
 
     public ClearAllButton getClearAllButton() {
         return mClearAllButton;
+    }
+
+    /**
+     * @return How many pixels the running task is offset on the x-axis due to the current scrollX.
+     */
+    public float getScrollOffset() {
+        int startScroll = getScrollForPage(getRunningTaskIndex());
+        int offsetX = startScroll - getScrollX();
+        offsetX *= getScaleX();
+        return offsetX;
     }
 
     public Consumer<MotionEvent> getEventDispatcher(RotationMode rotationMode) {

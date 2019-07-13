@@ -59,6 +59,7 @@ import android.view.View;
 import com.android.launcher3.DeviceProfile.OnDeviceProfileChangeListener;
 import com.android.launcher3.allapps.AllAppsTransitionController;
 import com.android.launcher3.anim.Interpolators;
+import com.android.launcher3.config.FeatureFlags;
 import com.android.launcher3.dragndrop.DragLayer;
 import com.android.launcher3.shortcuts.DeepShortcutView;
 import com.android.launcher3.util.MultiValueAlpha;
@@ -180,6 +181,12 @@ public abstract class QuickstepAppTransitionManagerImpl extends LauncherAppTrans
     @Override
     public void onDeviceProfileChanged(DeviceProfile dp) {
         mDeviceProfile = dp;
+    }
+
+    @Override
+    public boolean supportsAdaptiveIconAnimation() {
+        return hasControlRemoteAppTransitionPermission()
+                && FeatureFlags.ADAPTIVE_ICON_WINDOW_ANIM.get();
     }
 
     /**
@@ -758,7 +765,7 @@ public abstract class QuickstepAppTransitionManagerImpl extends LauncherAppTrans
                 LauncherAnimationRunner.AnimationResult result) {
             if (!mLauncher.hasBeenResumed()) {
                 // If launcher is not resumed, wait until new async-frame after resume
-                mLauncher.setOnResumeCallback(() ->
+                mLauncher.addOnResumeCallback(() ->
                         postAsyncCallback(mHandler, () ->
                                 onCreateAnimation(targetCompats, result)));
                 return;
