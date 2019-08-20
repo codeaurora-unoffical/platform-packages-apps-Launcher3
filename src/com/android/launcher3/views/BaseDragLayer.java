@@ -21,6 +21,7 @@ import static android.view.MotionEvent.ACTION_DOWN;
 import static android.view.MotionEvent.ACTION_UP;
 
 import static com.android.launcher3.Utilities.SINGLE_FRAME_MS;
+import static com.android.launcher3.Utilities.shouldDisableGestures;
 
 import android.annotation.TargetApi;
 import android.content.Context;
@@ -116,9 +117,23 @@ public abstract class BaseDragLayer<T extends Context & ActivityContext>
         mMultiValueAlpha = new MultiValueAlpha(this, alphaChannelCount);
     }
 
+    /**
+     * Same as {@link #isEventOverView(View, MotionEvent, View)} where evView == this drag layer.
+     */
     public boolean isEventOverView(View view, MotionEvent ev) {
         getDescendantRectRelativeToSelf(view, mHitRect);
         return mHitRect.contains((int) ev.getX(), (int) ev.getY());
+    }
+
+    /**
+     * Given a motion event in evView's coordinates, return whether the event is within another
+     * view's bounds.
+     */
+    public boolean isEventOverView(View view, MotionEvent ev, View evView) {
+        int[] xy = new int[] {(int) ev.getX(), (int) ev.getY()};
+        getDescendantCoordRelativeToSelf(evView, xy);
+        getDescendantRectRelativeToSelf(view, mHitRect);
+        return mHitRect.contains(xy[0], xy[1]);
     }
 
     @Override
@@ -137,6 +152,8 @@ public abstract class BaseDragLayer<T extends Context & ActivityContext>
     }
 
     private TouchController findControllerToHandleTouch(MotionEvent ev) {
+        if (shouldDisableGestures(ev)) return null;
+
         AbstractFloatingView topView = AbstractFloatingView.getTopOpenView(mActivity);
         if (topView != null && topView.onControllerInterceptTouchEvent(ev)) {
             return topView;
@@ -204,12 +221,10 @@ public abstract class BaseDragLayer<T extends Context & ActivityContext>
         if (child instanceof AbstractFloatingView) {
             // Handles the case where the view is removed without being properly closed.
             // This can happen if something goes wrong during a state change/transition.
-            postDelayed(() -> {
-                AbstractFloatingView floatingView = (AbstractFloatingView) child;
-                if (floatingView.isOpen()) {
-                    floatingView.close(false);
-                }
-            }, SINGLE_FRAME_MS);
+            AbstractFloatingView floatingView = (AbstractFloatingView) child;
+            if (floatingView.isOpen()) {
+                postDelayed(() -> floatingView.close(false), SINGLE_FRAME_MS);
+            }
         }
     }
 
