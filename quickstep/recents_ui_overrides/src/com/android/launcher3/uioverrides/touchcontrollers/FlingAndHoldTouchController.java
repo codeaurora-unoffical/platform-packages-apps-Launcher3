@@ -73,7 +73,11 @@ public class FlingAndHoldTouchController extends PortraitStatesTouchController {
         super(l, false /* allowDragToOverview */);
         mMotionPauseDetector = new MotionPauseDetector(l);
         mMotionPauseMinDisplacement = ViewConfiguration.get(l).getScaledTouchSlop();
-        mMotionPauseMaxDisplacement = getShiftRange() * MAX_DISPLACEMENT_PERCENT;
+        mMotionPauseMaxDisplacement = getMotionPauseMaxDisplacement();
+    }
+
+    protected float getMotionPauseMaxDisplacement() {
+        return getShiftRange() * MAX_DISPLACEMENT_PERCENT;
     }
 
     @Override
@@ -120,8 +124,8 @@ public class FlingAndHoldTouchController extends PortraitStatesTouchController {
         mPeekAnim.start();
         VibratorWrapper.INSTANCE.get(mLauncher).vibrate(OVERVIEW_HAPTIC);
 
-        mLauncher.getDragLayer().getScrim().animateToSysuiMultiplier(isPaused ? 0 : 1,
-                peekDuration, 0);
+        mLauncher.getDragLayer().getScrim().createSysuiMultiplierAnim(isPaused ? 0 : 1)
+                .setDuration(peekDuration).start();
     }
 
     /**

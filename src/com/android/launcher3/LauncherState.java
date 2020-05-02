@@ -73,7 +73,7 @@ public abstract class LauncherState {
     public static final int ALL_APPS_HEADER_EXTRA = 1 << 3; // e.g. app predictions
     public static final int ALL_APPS_CONTENT = 1 << 4;
     public static final int VERTICAL_SWIPE_INDICATOR = 1 << 5;
-    public static final int RECENTS_CLEAR_ALL_BUTTON = 1 << 6;
+    public static final int OVERVIEW_BUTTONS = 1 << 6;
 
     /** Mask of all the items that are contained in the apps view. */
     public static final int APPS_VIEW_ITEM_MASK =
@@ -271,11 +271,13 @@ public abstract class LauncherState {
     }
 
     /**
-     * The amount of blur to apply to the background of either the app or Launcher surface in this
-     * state.
+     * The amount of blur and wallpaper zoom to apply to the background of either the app
+     * or Launcher surface in this state. Should be a number between 0 and 1, inclusive.
+     *
+     * 0 means completely zoomed in, without blurs. 1 is zoomed out, with blurs.
      */
-    public int getBackgroundBlurRadius(Context context) {
-        return 0;
+    public float getDepth(Context context) {
+        return 0f;
     }
 
     public String getDescription(Launcher launcher) {

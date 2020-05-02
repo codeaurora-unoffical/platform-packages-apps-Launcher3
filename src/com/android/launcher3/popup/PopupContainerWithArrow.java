@@ -59,6 +59,7 @@ import com.android.launcher3.dot.DotInfo;
 import com.android.launcher3.dragndrop.DragController;
 import com.android.launcher3.dragndrop.DragOptions;
 import com.android.launcher3.dragndrop.DragView;
+import com.android.launcher3.dragndrop.DraggableView;
 import com.android.launcher3.notification.NotificationInfo;
 import com.android.launcher3.notification.NotificationItemView;
 import com.android.launcher3.notification.NotificationKeyData;
@@ -184,6 +185,13 @@ public class PopupContainerWithArrow<T extends BaseDraggingActivity> extends Arr
     }
 
     /**
+     * Returns true if we can show the container.
+     */
+    public static boolean canShow(View icon, ItemInfo item) {
+        return icon instanceof BubbleTextView && ShortcutUtil.supportsShortcuts(item);
+    }
+
+    /**
      * Shows the notifications and deep shortcuts associated with {@param icon}.
      * @return the container if shown or null.
      */
@@ -195,7 +203,7 @@ public class PopupContainerWithArrow<T extends BaseDraggingActivity> extends Arr
             return null;
         }
         ItemInfo item = (ItemInfo) icon.getTag();
-        if (!ShortcutUtil.supportsShortcuts(item)) {
+        if (!canShow(icon, item)) {
             return null;
         }
 
@@ -662,7 +670,8 @@ public class PopupContainerWithArrow<T extends BaseDraggingActivity> extends Arr
             iconShift.x = mIconLastTouchPos.x - sv.getIconCenter().x;
             iconShift.y = mIconLastTouchPos.y - mLauncher.getDeviceProfile().iconSizePx;
 
-            DragView dv = mLauncher.getWorkspace().beginDragShared(sv.getIconView(),
+            DraggableView draggableView = DraggableView.ofType(DraggableView.DRAGGABLE_ICON);
+            DragView dv = mLauncher.getWorkspace().beginDragShared(sv.getIconView(), draggableView,
                     mContainer, sv.getFinalInfo(),
                     new ShortcutDragPreviewProvider(sv.getIconView(), iconShift),
                     new DragOptions());
