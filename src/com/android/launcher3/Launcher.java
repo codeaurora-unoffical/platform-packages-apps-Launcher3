@@ -56,7 +56,6 @@ import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.database.sqlite.SQLiteDatabase;
 import android.graphics.Point;
-import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.CancellationSignal;
@@ -77,7 +76,6 @@ import android.view.Menu;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewTreeObserver;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.animation.OvershootInterpolator;
 import android.widget.Toast;
@@ -103,7 +101,6 @@ import com.android.launcher3.dragndrop.DragView;
 import com.android.launcher3.folder.Folder;
 import com.android.launcher3.folder.FolderGridOrganizer;
 import com.android.launcher3.folder.FolderIcon;
-import com.android.launcher3.graphics.RotationMode;
 import com.android.launcher3.icons.IconCache;
 import com.android.launcher3.keyboard.CustomActionsPopup;
 import com.android.launcher3.keyboard.ViewGroupFocusHelper;
@@ -115,6 +112,7 @@ import com.android.launcher3.model.BgDataModel.Callbacks;
 import com.android.launcher3.model.ModelWriter;
 import com.android.launcher3.notification.NotificationListener;
 import com.android.launcher3.pm.PinRequestHelper;
+import com.android.launcher3.pm.UserCache;
 import com.android.launcher3.popup.PopupContainerWithArrow;
 import com.android.launcher3.popup.PopupDataProvider;
 import com.android.launcher3.popup.SystemShortcut;
@@ -124,7 +122,6 @@ import com.android.launcher3.testing.TestLogging;
 import com.android.launcher3.testing.TestProtocol;
 import com.android.launcher3.touch.AllAppsSwipeController;
 import com.android.launcher3.touch.ItemClickHandler;
-import com.android.launcher3.uioverrides.BackgroundBlurController;
 import com.android.launcher3.uioverrides.plugins.PluginManagerWrapper;
 import com.android.launcher3.userevent.nano.LauncherLogProto.Action;
 import com.android.launcher3.userevent.nano.LauncherLogProto.ContainerType;
@@ -139,6 +136,7 @@ import com.android.launcher3.util.MultiValueAlpha.AlphaProperty;
 import com.android.launcher3.util.PackageManagerHelper;
 import com.android.launcher3.util.PackageUserKey;
 import com.android.launcher3.util.PendingRequestArgs;
+import com.android.launcher3.util.SafeCloseable;
 import com.android.launcher3.util.ShortcutUtil;
 import com.android.launcher3.util.SystemUiController;
 import com.android.launcher3.util.Themes;
@@ -271,7 +269,6 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
 
     // UI and state for the overview panel
     private View mOverviewPanel;
-    private View mActionsView;
 
     @Thunk
     boolean mWorkspaceLoading = true;
@@ -318,26 +315,15 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
 
     private float mCurrentAssistantVisibility = 0f;
 
-    private DeviceProfile mStableDeviceProfile;
-    private RotationMode mRotationMode = RotationMode.NORMAL;
-
     protected LauncherOverlayManager mOverlayManager;
     // If true, overlay callbacks are deferred
     private boolean mDeferOverlayCallbacks;
     private final Runnable mDeferredOverlayCallbacks = this::checkIfOverlayStillDeferred;
 
-    private BackgroundBlurController mBackgroundBlurController =
-            new BackgroundBlurController(this);
+    private long mLastTouchUpTime = -1;
+    private boolean mTouchInProgress;
 
-    private final ViewTreeObserver.OnDrawListener mOnDrawListener =
-            new ViewTreeObserver.OnDrawListener() {
-                @Override
-                public void onDraw() {
-                    getBackgroundBlurController().setSurfaceToLauncher(mDragLayer);
-                    mDragLayer.post(() -> mDragLayer.getViewTreeObserver().removeOnDrawListener(
-                            this));
-                }
-            };
+    private SafeCloseable mUserChangedCallbackCloseable;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -457,6 +443,9 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
         });
 
         TraceHelper.INSTANCE.endSection(traceToken);
+
+        mUserChangedCallbackCloseable = UserCache.INSTANCE.get(this).addUserChangeListener(
+                () -> getStateManager().goToState(NORMAL));
     }
 
     protected LauncherOverlayManager getDefaultOverlay() {
@@ -509,24 +498,12 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
         super.onConfigurationChanged(newConfig);
     }
 
-    public void reload() {
-        onIdpChanged(mDeviceProfile.inv);
-    }
-
-    private boolean supportsFakeLandscapeUI() {
-        return FeatureFlags.FAKE_LANDSCAPE_UI.get() && !mRotationHelper.homeScreenCanRotate();
-    }
-
     @Override
     public void reapplyUi() {
         reapplyUi(true /* cancelCurrentAnimation */);
     }
 
     public void reapplyUi(boolean cancelCurrentAnimation) {
-        if (supportsFakeLandscapeUI()) {
-            mRotationMode = mStableDeviceProfile == null
-                    ? RotationMode.NORMAL : getFakeRotationMode(mDeviceProfile);
-        }
         getRootView().dispatchInsets();
         getStateManager().reapplyState(cancelCurrentAnimation);
     }
@@ -539,7 +516,6 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
     private void onIdpChanged(InvariantDeviceProfile idp) {
         mUserEventDispatcher = null;
 
-        DeviceProfile oldWallpaperProfile = getWallpaperDeviceProfile();
         initDeviceProfile(idp);
         dispatchDeviceProfileChanged();
         reapplyUi();
@@ -548,9 +524,7 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
         // Calling onSaveInstanceState ensures that static cache used by listWidgets is
         // initialized properly.
         onSaveInstanceState(new Bundle());
-        if (oldWallpaperProfile != getWallpaperDeviceProfile()) {
-            mModel.rebindCallbacks();
-        }
+        mModel.rebindCallbacks();
     }
 
     public void onAssistantVisibilityChanged(float visibility) {
@@ -577,41 +551,8 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
             mDeviceProfile = mDeviceProfile.getMultiWindowProfile(this, mwSize);
         }
 
-        if (supportsFakeLandscapeUI() && mDeviceProfile.isVerticalBarLayout()) {
-            mStableDeviceProfile = mDeviceProfile.inv.portraitProfile;
-            mRotationMode = getFakeRotationMode(mDeviceProfile);
-        } else {
-            mStableDeviceProfile = null;
-            mRotationMode = RotationMode.NORMAL;
-        }
-
-        mRotationHelper.updateRotationAnimation();
         onDeviceProfileInitiated();
-        mModelWriter = mModel.getWriter(getWallpaperDeviceProfile().isVerticalBarLayout(), true);
-    }
-
-    public void updateInsets(Rect insets) {
-        mDeviceProfile.updateInsets(insets);
-        if (mStableDeviceProfile != null) {
-            Rect r = mStableDeviceProfile.getInsets();
-            mRotationMode.mapInsets(this, insets, r);
-            mStableDeviceProfile.updateInsets(r);
-        }
-    }
-
-    @Override
-    public RotationMode getRotationMode() {
-        return mRotationMode;
-    }
-
-    /**
-     * Device profile to be used by UI elements which are shown directly on top of the wallpaper
-     * and whose presentation is tied to the wallpaper (and physical device) and not the activity
-     * configuration.
-     */
-    @Override
-    public DeviceProfile getWallpaperDeviceProfile() {
-        return mStableDeviceProfile == null ? mDeviceProfile : mStableDeviceProfile;
+        mModelWriter = mModel.getWriter(getDeviceProfile().isVerticalBarLayout(), true);
     }
 
     public RotationHelper getRotationHelper() {
@@ -758,8 +699,8 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
                     data.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1) : -1;
             if (resultCode == RESULT_CANCELED) {
                 completeTwoStageWidgetDrop(RESULT_CANCELED, appWidgetId, requestArgs);
-                mWorkspace.removeExtraEmptyScreenDelayed(true, exitSpringLoaded,
-                        ON_ACTIVITY_RESULT_ANIMATION_DELAY, false);
+                mWorkspace.removeExtraEmptyScreenDelayed(
+                        ON_ACTIVITY_RESULT_ANIMATION_DELAY, false, exitSpringLoaded);
             } else if (resultCode == RESULT_OK) {
                 addAppWidgetImpl(
                         appWidgetId, requestArgs, null,
@@ -789,15 +730,9 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
                         "returned from the widget configuration activity.");
                 result = RESULT_CANCELED;
                 completeTwoStageWidgetDrop(result, appWidgetId, requestArgs);
-                final Runnable onComplete = new Runnable() {
-                    @Override
-                    public void run() {
-                        getStateManager().goToState(NORMAL);
-                    }
-                };
-
-                mWorkspace.removeExtraEmptyScreenDelayed(true, onComplete,
-                        ON_ACTIVITY_RESULT_ANIMATION_DELAY, false);
+                mWorkspace.removeExtraEmptyScreenDelayed(
+                        ON_ACTIVITY_RESULT_ANIMATION_DELAY, false,
+                        () -> getStateManager().goToState(NORMAL));
             } else {
                 if (requestArgs.container == LauncherSettings.Favorites.CONTAINER_DESKTOP) {
                     // When the screen id represents an actual screen (as opposed to a rank)
@@ -816,8 +751,8 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
                         dropLayout.setDropPending(false);
                     }
                 };
-                mWorkspace.removeExtraEmptyScreenDelayed(true, onComplete,
-                        ON_ACTIVITY_RESULT_ANIMATION_DELAY, false);
+                mWorkspace.removeExtraEmptyScreenDelayed(
+                        ON_ACTIVITY_RESULT_ANIMATION_DELAY, false, onComplete);
             }
             return;
         }
@@ -836,12 +771,12 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
             // Handle custom shortcuts created using ACTION_CREATE_SHORTCUT.
             if (resultCode == RESULT_OK && requestArgs.container != ItemInfo.NO_ID) {
                 completeAdd(requestCode, data, -1, requestArgs);
-                mWorkspace.removeExtraEmptyScreenDelayed(true, exitSpringLoaded,
-                        ON_ACTIVITY_RESULT_ANIMATION_DELAY, false);
+                mWorkspace.removeExtraEmptyScreenDelayed(
+                        ON_ACTIVITY_RESULT_ANIMATION_DELAY, false, exitSpringLoaded);
 
             } else if (resultCode == RESULT_CANCELED) {
-                mWorkspace.removeExtraEmptyScreenDelayed(true, exitSpringLoaded,
-                        ON_ACTIVITY_RESULT_ANIMATION_DELAY, false);
+                mWorkspace.removeExtraEmptyScreenDelayed(
+                        ON_ACTIVITY_RESULT_ANIMATION_DELAY, false, exitSpringLoaded);
             }
         }
 
@@ -940,8 +875,6 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
         final int origDragLayerChildCount = mDragLayer.getChildCount();
         super.onStop();
 
-        mDragLayer.getViewTreeObserver().removeOnDrawListener(mOnDrawListener);
-
         if (mDeferOverlayCallbacks) {
             checkIfOverlayStillDeferred();
         } else {
@@ -954,7 +887,6 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
 
         NotificationListener.removeNotificationsChangedListener();
         getStateManager().moveToRestState();
-        getBackgroundBlurController().setSurfaceToLauncher(null);
 
         // Workaround for b/78520668, explicitly trim memory once UI is hidden
         onTrimMemory(TRIM_MEMORY_UI_HIDDEN);
@@ -972,6 +904,8 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
                 }
             });
         }
+
+        TestLogging.recordEvent(TestProtocol.SEQUENCE_MAIN, "Activity.onStop");
     }
 
     @Override
@@ -982,10 +916,10 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
         if (!mDeferOverlayCallbacks) {
             mOverlayManager.onActivityStarted(this);
         }
-        mDragLayer.getViewTreeObserver().addOnDrawListener(mOnDrawListener);
 
         mAppWidgetHost.setListenIfResumed(true);
         TraceHelper.INSTANCE.endSection(traceToken);
+        TestLogging.recordEvent(TestProtocol.SEQUENCE_MAIN, "Activity.onStart");
     }
 
     private void handleDeferredResume() {
@@ -1115,7 +1049,7 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
 
         super.onPause();
         mDragController.cancelDrag();
-        mDragController.resetLastGestureUpTime();
+        mLastTouchUpTime = -1;
         mDropTargetBar.animateToVisibility(false);
 
         if (!mDeferOverlayCallbacks) {
@@ -1178,7 +1112,6 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
         mWorkspace = mDragLayer.findViewById(R.id.workspace);
         mWorkspace.initParentViews(mDragLayer);
         mOverviewPanel = findViewById(R.id.overview_panel);
-        mActionsView = findViewById(R.id.overview_actions_view);
         mHotseat = findViewById(R.id.hotseat);
 
         mLauncherView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
@@ -1205,10 +1138,9 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
         mScrimView = findViewById(R.id.scrim_view);
 
         // Setup the drag controller (drop targets have to be added in reverse order in priority)
-        mDragController.setMoveTarget(mWorkspace);
         mDropTargetBar.setup(mDragController);
 
-        mAllAppsController.setupViews(mAppsView);
+        mAllAppsController.setupViews(mAppsView, mScrimView);
     }
 
     /**
@@ -1426,12 +1358,12 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
         return (T) mOverviewPanel;
     }
 
-    public View getActionsView() {
-        return mActionsView;
-    }
-
     public DropTargetBar getDropTargetBar() {
         return mDropTargetBar;
+    }
+
+    public ScrimView getScrimView() {
+        return mScrimView;
     }
 
     public LauncherAppWidgetHost getAppWidgetHost() {
@@ -1505,11 +1437,7 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
             target.pageIndex = mWorkspace.getCurrentPage();
             ued.logActionCommand(Action.Command.HOME_INTENT, target,
                     newContainerTarget(ContainerType.WORKSPACE));
-
-            final View v = getWindow().peekDecorView();
-            if (v != null && v.getWindowToken() != null) {
-                UiThreadHelper.hideKeyboardAsync(this, v.getWindowToken());
-            }
+            hideKeyboard();
 
             if (mLauncherCallbacks != null) {
                 mLauncherCallbacks.onHomeIntent(internalStateHandled);
@@ -1518,6 +1446,16 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
         }
 
         TraceHelper.INSTANCE.endSection(traceToken);
+    }
+
+    /**
+     * Hides the keyboard if visible
+     */
+    public void hideKeyboard() {
+        final View v = getWindow().peekDecorView();
+        if (v != null && v.getWindowToken() != null) {
+            UiThreadHelper.hideKeyboardAsync(this, v.getWindowToken());
+        }
     }
 
     @Override
@@ -1587,6 +1525,7 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
 
         mOverlayManager.onActivityDestroyed(this);
         mAppTransitionManager.unregisterRemoteAnimations();
+        mUserChangedCallbackCloseable.close();
     }
 
     public LauncherAccessibilityDelegate getAccessibilityDelegate() {
@@ -1680,7 +1619,7 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
             };
             completeAddAppWidget(appWidgetId, info, boundWidget,
                     addFlowHandler.getProviderInfo(this));
-            mWorkspace.removeExtraEmptyScreenDelayed(true, onComplete, delay, false);
+            mWorkspace.removeExtraEmptyScreenDelayed(delay, false, onComplete);
         }
     }
 
@@ -1765,7 +1704,6 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
     public FolderIcon addFolder(CellLayout layout, int container, final int screenId, int cellX,
             int cellY) {
         final FolderInfo folderInfo = new FolderInfo();
-        folderInfo.title = "";
 
         // Update the model
         getModelWriter().addItemToDatabase(folderInfo, container, screenId, cellX, cellY);
@@ -1838,8 +1776,26 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
+        switch (ev.getAction()) {
+            case MotionEvent.ACTION_DOWN:
+                mTouchInProgress = true;
+                break;
+            case MotionEvent.ACTION_UP:
+                mLastTouchUpTime = System.currentTimeMillis();
+                // Follow through
+            case MotionEvent.ACTION_CANCEL:
+                mTouchInProgress = false;
+                break;
+        }
         TestLogging.recordMotionEvent(TestProtocol.SEQUENCE_MAIN, "Touch event", ev);
         return super.dispatchTouchEvent(ev);
+    }
+
+    /**
+     * Returns true if a touch interaction is in progress
+     */
+    public boolean isTouchInProgress() {
+        return mTouchInProgress;
     }
 
     @Override
@@ -2043,7 +1999,7 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
         mAppWidgetHost.clearViews();
 
         if (mHotseat != null) {
-            mHotseat.resetLayout(getWallpaperDeviceProfile().isVerticalBarLayout());
+            mHotseat.resetLayout(getDeviceProfile().isVerticalBarLayout());
         }
         TraceHelper.INSTANCE.endSection(traceToken);
     }
@@ -2107,7 +2063,7 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
         }
 
         // Remove the extra empty screen
-        mWorkspace.removeExtraEmptyScreen(false, false);
+        mWorkspace.removeExtraEmptyScreen(false);
     }
 
     /**
@@ -2465,8 +2421,12 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
     }
 
     private boolean canRunNewAppsAnimation() {
-        long diff = System.currentTimeMillis() - mDragController.getLastGestureUpTime();
-        return diff > (NEW_APPS_ANIMATION_INACTIVE_TIMEOUT_SECONDS * 1000);
+        if (mDragController.isDragging()) {
+            return false;
+        } else {
+            return (System.currentTimeMillis() - mLastTouchUpTime)
+                    > (NEW_APPS_ANIMATION_INACTIVE_TIMEOUT_SECONDS * 1000);
+        }
     }
 
     private ValueAnimator createNewAppBounceAnimation(View v, int i) {
@@ -2707,16 +2667,11 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
     }
 
     protected StateHandler[] createStateHandlers() {
-        return new StateHandler[] { getAllAppsController(), getWorkspace(),
-                getBackgroundBlurController() };
+        return new StateHandler[] { getAllAppsController(), getWorkspace() };
     }
 
     public TouchController[] createTouchControllers() {
         return new TouchController[] {getDragController(), new AllAppsSwipeController(this)};
-    }
-
-    protected RotationMode getFakeRotationMode(DeviceProfile deviceProfile) {
-        return RotationMode.NORMAL;
     }
 
     protected ScaleAndTranslation getOverviewScaleAndTranslationForNormalState() {
@@ -2743,10 +2698,6 @@ public class Launcher extends BaseDraggingActivity implements LauncherExterns,
 
     public Stream<SystemShortcut.Factory> getSupportedShortcuts() {
         return Stream.of(APP_INFO, WIDGETS, INSTALL);
-    }
-
-    public BackgroundBlurController getBackgroundBlurController() {
-        return mBackgroundBlurController;
     }
 
     public static Launcher getLauncher(Context context) {

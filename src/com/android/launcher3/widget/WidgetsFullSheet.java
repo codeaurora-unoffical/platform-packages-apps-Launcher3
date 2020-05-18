@@ -24,6 +24,7 @@ import android.animation.PropertyValuesHolder;
 import android.content.Context;
 import android.graphics.Rect;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.util.Pair;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
@@ -38,8 +39,10 @@ import com.android.launcher3.Launcher;
 import com.android.launcher3.LauncherAppState;
 import com.android.launcher3.LauncherAppWidgetHost.ProviderChangedListener;
 import com.android.launcher3.R;
+import com.android.launcher3.Utilities;
 import com.android.launcher3.anim.PendingAnimation;
 import com.android.launcher3.compat.AccessibilityManagerCompat;
+import com.android.launcher3.testing.TestProtocol;
 import com.android.launcher3.views.RecyclerViewFastScroller;
 import com.android.launcher3.views.TopRoundedCornerView;
 
@@ -68,6 +71,14 @@ public class WidgetsFullSheet extends BaseWidgetSheet
 
     }
 
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (Utilities.IS_RUNNING_IN_TEST_HARNESS) {
+            Log.d(TestProtocol.NO_SCROLL_END_WIDGETS, "WidgetsFullSheet: " + ev);
+        }
+        return super.dispatchTouchEvent(ev);
+    }
+
     public WidgetsFullSheet(Context context, AttributeSet attrs) {
         this(context, attrs, 0);
     }
@@ -85,6 +96,11 @@ public class WidgetsFullSheet extends BaseWidgetSheet
         springLayout.addSpringView(R.id.widgets_list_view);
         mRecyclerView.setEdgeEffectFactory(springLayout.createEdgeEffectFactory());
         onWidgetsBound();
+    }
+
+    @VisibleForTesting
+    public WidgetsRecyclerView getRecyclerView() {
+        return mRecyclerView;
     }
 
     @Override

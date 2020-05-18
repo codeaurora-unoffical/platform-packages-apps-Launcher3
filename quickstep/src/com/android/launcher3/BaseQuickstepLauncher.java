@@ -34,6 +34,7 @@ import android.content.Intent;
 import android.content.IntentSender;
 import android.os.Bundle;
 import android.os.CancellationSignal;
+import android.view.View;
 
 import com.android.launcher3.LauncherState.ScaleAndTranslation;
 import com.android.launcher3.LauncherStateManager.StateHandler;
@@ -43,8 +44,9 @@ import com.android.launcher3.model.WellbeingModel;
 import com.android.launcher3.popup.SystemShortcut;
 import com.android.launcher3.proxy.ProxyActivityStarter;
 import com.android.launcher3.proxy.StartActivityParams;
+import com.android.launcher3.statehandlers.BackButtonAlphaHandler;
+import com.android.launcher3.statehandlers.DepthController;
 import com.android.launcher3.touch.PagedOrientationHandler;
-import com.android.launcher3.uioverrides.BackButtonAlphaHandler;
 import com.android.launcher3.uioverrides.RecentsViewStateController;
 import com.android.launcher3.util.UiThreadHelper;
 import com.android.quickstep.RecentsModel;
@@ -67,6 +69,7 @@ import java.util.stream.Stream;
 public abstract class BaseQuickstepLauncher extends Launcher
         implements NavigationModeChangeListener {
 
+    private DepthController mDepthController = new DepthController(this);
     protected SystemActions mSystemActions;
 
     /**
@@ -78,14 +81,14 @@ public abstract class BaseQuickstepLauncher extends Launcher
 
     private final ShelfPeekAnim mShelfPeekAnim = new ShelfPeekAnim(this);
 
+    private View mActionsView;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         mSystemActions = new SystemActions(this);
 
-        SysUINavigationMode.Mode mode = SysUINavigationMode.INSTANCE.get(this)
-                .addModeChangeListener(this);
-        getRotationHelper().setRotationHadDifferentUI(mode != Mode.NO_BUTTON);
+        SysUINavigationMode.INSTANCE.get(this).addModeChangeListener(this);
 
         if (!getSharedPrefs().getBoolean(HOME_BOUNCE_SEEN, false)) {
             getStateManager().addStateListener(new LauncherStateManager.StateListener() {
@@ -136,7 +139,6 @@ public abstract class BaseQuickstepLauncher extends Launcher
     @Override
     public void onNavigationModeChanged(Mode newMode) {
         getDragLayer().recreateControllers();
-        getRotationHelper().setRotationHadDifferentUI(newMode != Mode.NO_BUTTON);
     }
 
     @Override
@@ -222,14 +224,20 @@ public abstract class BaseQuickstepLauncher extends Launcher
     @Override
     protected void setupViews() {
         super.setupViews();
+        mActionsView = findViewById(R.id.overview_actions_view);
+
 
         if (FeatureFlags.ENABLE_OVERVIEW_ACTIONS.get() && removeShelfFromOverview(this)) {
             // Overview is above all other launcher elements, including qsb, so move it to the top.
             getOverviewPanel().bringToFront();
-            if (getActionsView() != null) {
-                getActionsView().bringToFront();
+            if (mActionsView != null) {
+                mActionsView.bringToFront();
             }
         }
+    }
+
+    public View getActionsView() {
+        return mActionsView;
     }
 
     @Override
@@ -244,9 +252,13 @@ public abstract class BaseQuickstepLauncher extends Launcher
         return new StateHandler[] {
                 getAllAppsController(),
                 getWorkspace(),
-                getBackgroundBlurController(),
+                getDepthController(),
                 new RecentsViewStateController(this),
                 new BackButtonAlphaHandler(this)};
+    }
+
+    public DepthController getDepthController() {
+        return mDepthController;
     }
 
     @Override
@@ -292,6 +304,10 @@ public abstract class BaseQuickstepLauncher extends Launcher
         if ((changeBits
                 & (ACTIVITY_STATE_WINDOW_FOCUSED | ACTIVITY_STATE_TRANSITION_ACTIVE)) != 0) {
             onLauncherStateOrFocusChanged();
+        }
+
+        if ((changeBits & ACTIVITY_STATE_STARTED) != 0) {
+            mDepthController.setActivityStarted(isStarted());
         }
 
         super.onActivityFlagsChanged(changeBits);

@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2019 The Android Open Source Project
+/*
+ * Copyright (C) 2020 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,14 +13,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.android.launcher3.views;
+package com.android.launcher3.logging;
 
-import com.android.launcher3.graphics.RotationMode;
+import static java.lang.annotation.ElementType.FIELD;
+import static java.lang.annotation.RetentionPolicy.SOURCE;
 
-/**
- * Indicates that a view can be transposed.
- */
-public interface Transposable {
+import java.lang.annotation.Retention;
+import java.lang.annotation.Target;
 
-    RotationMode getRotationMode();
+@Retention(SOURCE)
+@Target(FIELD)
+public @interface LauncherUiEvent {
+    /** An explanation, suitable for Android analysts, of the UI event that this log represents. */
+    String doc();
 }
+

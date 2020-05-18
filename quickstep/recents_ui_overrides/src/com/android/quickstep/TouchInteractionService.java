@@ -15,11 +15,14 @@
  */
 package com.android.quickstep;
 
+import static android.view.MotionEvent.ACTION_CANCEL;
 import static android.view.MotionEvent.ACTION_DOWN;
+import static android.view.MotionEvent.ACTION_UP;
 
 import static com.android.launcher3.config.FeatureFlags.ENABLE_QUICKSTEP_LIVE_TILE;
 import static com.android.launcher3.util.Executors.MAIN_EXECUTOR;
 import static com.android.launcher3.util.Executors.UI_HELPER_EXECUTOR;
+import static com.android.quickstep.GestureState.DEFAULT_STATE;
 import static com.android.systemui.shared.system.QuickStepContract.KEY_EXTRA_INPUT_MONITOR;
 import static com.android.systemui.shared.system.QuickStepContract.KEY_EXTRA_SYSUI_PROXY;
 import static com.android.systemui.shared.system.QuickStepContract.SYSUI_STATE_TRACING_ENABLED;
@@ -122,6 +125,7 @@ public class TouchInteractionService extends Service implements PluginListener<O
     private static final String NOTIFY_ACTION_BACK = "com.android.quickstep.action.BACK_GESTURE";
     private static final String HAS_ENABLED_QUICKSTEP_ONCE = "launcher.has_enabled_quickstep_once";
     private static final int MAX_BACK_NOTIFICATION_COUNT = 3;
+
     private int mBackGestureNotificationCounter = -1;
     @Nullable
     private OverscrollPlugin mOverscrollPlugin;
@@ -261,7 +265,7 @@ public class TouchInteractionService extends Service implements PluginListener<O
     private InputConsumer mConsumer = InputConsumer.NO_OP;
     private Choreographer mMainChoreographer;
     private InputConsumer mResetGestureInputConsumer;
-    private GestureState mGestureState = new GestureState();
+    private GestureState mGestureState = DEFAULT_STATE;
 
     private InputMonitorCompat mInputMonitorCompat;
     private InputEventReceiver mInputEventReceiver;
@@ -433,23 +437,26 @@ public class TouchInteractionService extends Service implements PluginListener<O
 
         Object traceToken = TraceHelper.INSTANCE.beginFlagsOverride(
                 TraceHelper.FLAG_ALLOW_BINDER_TRACKING);
-        mDeviceState.setOrientationTransformIfNeeded(event);
 
-        if (event.getAction() == ACTION_DOWN) {
-            GestureState newGestureState = new GestureState(mOverviewComponentObserver,
-                    ActiveGestureLog.INSTANCE.generateAndSetLogId());
-            newGestureState.updateRunningTask(TraceHelper.whitelistIpcs("getRunningTask.0",
-                    () -> mAM.getRunningTask(0)));
+        final int action = event.getAction();
+        if (action == ACTION_DOWN) {
+            mDeviceState.setOrientationTransformIfNeeded(event);
+            GestureState newGestureState;
 
             if (mDeviceState.isInSwipeUpTouchRegion(event)) {
+                // Clone the previous gesture state since onConsumerAboutToBeSwitched might trigger
+                // onConsumerInactive and wipe the previous gesture state
+                GestureState prevGestureState = new GestureState(mGestureState);
+                newGestureState = createGestureState();
                 mConsumer.onConsumerAboutToBeSwitched();
-                mConsumer = newConsumer(mGestureState, newGestureState, event);
+                mConsumer = newConsumer(prevGestureState, newGestureState, event);
 
                 ActiveGestureLog.INSTANCE.addLog("setInputConsumer", mConsumer.getType());
                 mUncheckedConsumer = mConsumer;
             } else if (mDeviceState.isUserUnlocked()
                     && mDeviceState.isFullyGesturalNavMode()
                     && mDeviceState.canTriggerAssistantAction(event)) {
+                newGestureState = createGestureState();
                 // Do not change mConsumer as if there is an ongoing QuickSwitch gesture, we should
                 // not interrupt it. QuickSwitch assumes that interruption can only happen if the
                 // next gesture is also quick switch.
@@ -459,16 +466,38 @@ public class TouchInteractionService extends Service implements PluginListener<O
                     InputConsumer.NO_OP, mInputMonitorCompat,
                     mOverviewComponentObserver.assistantGestureIsConstrained());
             } else {
+                newGestureState = DEFAULT_STATE;
                 mUncheckedConsumer = InputConsumer.NO_OP;
             }
 
             // Save the current gesture state
             mGestureState = newGestureState;
+        } else {
+            // Other events
+            if (mUncheckedConsumer != InputConsumer.NO_OP) {
+                // Only transform the event if we are handling it in a proper consumer
+                mDeviceState.setOrientationTransformIfNeeded(event);
+            }
         }
 
         ActiveGestureLog.INSTANCE.addLog("onMotionEvent", event.getActionMasked());
         mUncheckedConsumer.onMotionEvent(event);
+
+        if (action == ACTION_UP || action == ACTION_CANCEL) {
+            if (mConsumer != null && !mConsumer.isConsumerDetachedFromGesture()) {
+                onConsumerInactive(mConsumer);
+            }
+        }
+
         TraceHelper.INSTANCE.endFlagsOverride(traceToken);
+    }
+
+    private GestureState createGestureState() {
+        GestureState gestureState = new GestureState(mOverviewComponentObserver,
+                ActiveGestureLog.INSTANCE.generateAndSetLogId());
+        gestureState.updateRunningTask(TraceHelper.whitelistIpcs("getRunningTask.0",
+                () -> mAM.getRunningTask(true /* filterOnlyVisibleRecents */)));
+        return gestureState;
     }
 
     private InputConsumer newConsumer(GestureState previousGestureState,
@@ -567,18 +596,10 @@ public class TouchInteractionService extends Service implements PluginListener<O
             return createDeviceLockedInputConsumer(gestureState);
         }
 
-        boolean forceOverviewInputConsumer = false;
-        if (AssistantUtilities.isExcludedAssistant(gestureState.getRunningTask())) {
-            // In the case where we are in the excluded assistant state, ignore it and treat the
-            // running activity as the task behind the assistant
-            gestureState.updateRunningTask(TraceHelper.whitelistIpcs("getRunningTask.assistant",
-                    () -> mAM.getRunningTask(ACTIVITY_TYPE_ASSISTANT /* ignoreActivityType */)));
-            ComponentName homeComponent = mOverviewComponentObserver.getHomeIntent().getComponent();
-            ComponentName runningComponent =
-                    gestureState.getRunningTask().baseIntent.getComponent();
-            forceOverviewInputConsumer =
-                    runningComponent != null && runningComponent.equals(homeComponent);
-        }
+        RunningTaskInfo runningTask = gestureState.getRunningTask();
+        ComponentName homeComponent = mOverviewComponentObserver.getHomeIntent().getComponent();
+        boolean forceOverviewInputConsumer = runningTask != null
+                && runningTask.baseIntent.getComponent().equals(homeComponent);
 
         if (previousGestureState.getFinishingRecentsAnimationTaskId() > 0) {
             // If the finish animation was interrupted, then continue using the other activity input
@@ -660,9 +681,9 @@ public class TouchInteractionService extends Service implements PluginListener<O
      * To be called by the consumer when it's no longer active.
      */
     private void onConsumerInactive(InputConsumer caller) {
-        if (mConsumer == caller) {
-            mConsumer = mResetGestureInputConsumer;
-            mUncheckedConsumer = mConsumer;
+        if (mConsumer != null && mConsumer.isInConsumerHierarchy(caller)) {
+            mConsumer = mUncheckedConsumer = mResetGestureInputConsumer;
+            mGestureState = new GestureState();
         }
     }
 

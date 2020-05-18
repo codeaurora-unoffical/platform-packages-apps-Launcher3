@@ -19,7 +19,6 @@ import android.content.Context;
 
 import com.android.launcher3.AbstractFloatingView;
 import com.android.launcher3.Launcher;
-import com.android.launcher3.R;
 import com.android.launcher3.allapps.AllAppsTransitionController;
 import com.android.launcher3.userevent.nano.LauncherLogProto;
 import com.android.quickstep.util.LayoutUtils;
@@ -91,7 +90,7 @@ public class BackgroundAppState extends OverviewState {
     @Override
     public int getVisibleElements(Launcher launcher) {
         return super.getVisibleElements(launcher)
-                & ~RECENTS_CLEAR_ALL_BUTTON & ~VERTICAL_SWIPE_INDICATOR;
+                & ~OVERVIEW_BUTTONS & ~VERTICAL_SWIPE_INDICATOR;
     }
 
     @Override
@@ -107,7 +106,7 @@ public class BackgroundAppState extends OverviewState {
     }
 
     @Override
-    public int getBackgroundBlurRadius(Context context) {
-        return context.getResources().getInteger(R.integer.app_background_blur_radius);
+    public float getDepth(Context context) {
+        return 1f;
     }
 }
