@@ -67,7 +67,6 @@ import com.android.launcher3.util.IntArray;
 import com.android.launcher3.util.TouchController;
 import com.android.launcher3.util.UiThreadHelper;
 import com.android.launcher3.util.UiThreadHelper.AsyncCommand;
-import com.android.quickstep.RecentsModel;
 import com.android.quickstep.SysUINavigationMode;
 import com.android.quickstep.SysUINavigationMode.Mode;
 import com.android.quickstep.SystemUiProxy;
@@ -95,13 +94,14 @@ public class QuickstepLauncher extends BaseQuickstepLauncher {
         super.onCreate(savedInstanceState);
         if (FeatureFlags.ENABLE_HYBRID_HOTSEAT.get()) {
             mHotseatPredictionController = new HotseatPredictionController(this);
+            mHotseatPredictionController.createPredictor();
         }
     }
 
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
-        onStateOrResumeChanged();
+        onStateOrResumeChanging(false /* inTransition */);
     }
 
     @Override
@@ -116,11 +116,9 @@ public class QuickstepLauncher extends BaseQuickstepLauncher {
     @Override
     protected void onActivityFlagsChanged(int changeBits) {
         super.onActivityFlagsChanged(changeBits);
-
         if ((changeBits & (ACTIVITY_STATE_DEFERRED_RESUMED | ACTIVITY_STATE_STARTED
-                | ACTIVITY_STATE_USER_ACTIVE | ACTIVITY_STATE_TRANSITION_ACTIVE)) != 0
-                && (getActivityFlags() & ACTIVITY_STATE_TRANSITION_ACTIVE) == 0) {
-            onStateOrResumeChanged();
+                | ACTIVITY_STATE_USER_ACTIVE | ACTIVITY_STATE_TRANSITION_ACTIVE)) != 0) {
+            onStateOrResumeChanging((getActivityFlags() & ACTIVITY_STATE_TRANSITION_ACTIVE) == 0);
         }
 
         if (mHotseatPredictionController != null && ((changeBits & ACTIVITY_STATE_STARTED) != 0
@@ -165,23 +163,18 @@ public class QuickstepLauncher extends BaseQuickstepLauncher {
     /**
      * Recents logic that triggers when launcher state changes or launcher activity stops/resumes.
      */
-    private void onStateOrResumeChanged() {
+    private void onStateOrResumeChanging(boolean inTransition) {
         LauncherState state = getStateManager().getState();
         DeviceProfile profile = getDeviceProfile();
-        boolean visible = (state == NORMAL || state == OVERVIEW) && isUserActive()
-                && !profile.isVerticalBarLayout();
+        boolean willUserBeActive = (getActivityFlags() & ACTIVITY_STATE_USER_WILL_BE_ACTIVE) != 0;
+        boolean visible = (state == NORMAL || state == OVERVIEW)
+                && (willUserBeActive || isUserActive())
+                && !profile.isVerticalBarLayout()
+                && profile.isPhone && !profile.isLandscape;
         UiThreadHelper.runAsyncCommand(this, SET_SHELF_HEIGHT, visible ? 1 : 0,
                 profile.hotseatBarSizePx);
-        if (state == NORMAL) {
+        if (state == NORMAL && !inTransition) {
             ((RecentsView) getOverviewPanel()).setSwipeDownShouldLaunchApp(false);
-        }
-    }
-
-    @Override
-    public void finishBindingItems(int pageBoundFirst) {
-        super.finishBindingItems(pageBoundFirst);
-        if (mHotseatPredictionController != null) {
-            mHotseatPredictionController.createPredictor();
         }
     }
 
@@ -218,7 +211,9 @@ public class QuickstepLauncher extends BaseQuickstepLauncher {
                 break;
             }
             case OVERVIEW_STATE_ORDINAL: {
-                DiscoveryBounce.showForOverviewIfNeeded(this);
+                RecentsView recentsView = getOverviewPanel();
+                DiscoveryBounce.showForOverviewIfNeeded(this,
+                        recentsView.getPagedOrientationHandler());
                 RecentsView rv = getOverviewPanel();
                 sendCustomAccessibilityEvent(
                         rv.getPageAt(rv.getCurrentPage()), TYPE_VIEW_FOCUSED, null);

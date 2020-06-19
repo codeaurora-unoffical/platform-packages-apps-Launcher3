@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 The Android Open Source Project
+ * Copyright (C) 2020 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,19 +13,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.android.quickstep;
+package com.android.launcher3.uioverrides;
 
-import android.app.Activity;
-import android.os.Bundle;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
 
-/**
- * Empty activity to start a recents transition
- */
-public class LockScreenRecentsActivity extends Activity {
+import com.android.launcher3.model.data.WorkspaceItemInfo;
 
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        finish();
+/** A util class that inflates a predicted app icon */
+public class PredictedAppIconInflater {
+    public static View inflate(LayoutInflater inflater, ViewGroup parent, WorkspaceItemInfo info) {
+        return null;
     }
 }

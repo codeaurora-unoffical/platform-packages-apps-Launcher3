@@ -63,6 +63,7 @@ import com.android.launcher3.config.FeatureFlags;
 import com.android.launcher3.logging.UserEventDispatcher;
 import com.android.launcher3.model.AppLaunchTracker;
 import com.android.launcher3.provider.RestoreDbTask;
+import com.android.launcher3.statemanager.StatefulActivity;
 import com.android.launcher3.testing.TestLogging;
 import com.android.launcher3.testing.TestProtocol;
 import com.android.launcher3.tracing.nano.LauncherTraceProto;
@@ -84,7 +85,6 @@ import com.android.quickstep.util.ActiveGestureLog;
 import com.android.quickstep.util.AssistantUtilities;
 import com.android.quickstep.util.ProtoTracer;
 import com.android.quickstep.util.SplitScreenBounds;
-import com.android.quickstep.views.RecentsView;
 import com.android.systemui.plugins.OverscrollPlugin;
 import com.android.systemui.plugins.PluginListener;
 import com.android.systemui.shared.recents.IOverviewProxy;
@@ -539,8 +539,6 @@ public class TouchInteractionService extends Service implements PluginListener<O
         boolean canStartSystemGesture = mDeviceState.canStartSystemGesture();
 
         if (!mDeviceState.isUserUnlocked()) {
-            Log.d(TAG, "User locked. Can start system gesture? " + canStartSystemGesture
-                + " sysUiFlags: " + mDeviceState.getSystemUiStateFlags());
             if (canStartSystemGesture) {
                 // This handles apps launched in direct boot mode (e.g. dialer) as well as apps
                 // launched while device is locked even after exiting direct boot mode (e.g. camera).
@@ -556,7 +554,6 @@ public class TouchInteractionService extends Service implements PluginListener<O
                 || previousGestureState.isRecentsAnimationRunning()
                         ? newBaseConsumer(previousGestureState, newGestureState, event)
                         : mResetGestureInputConsumer;
-        // TODO(b/149880412): 2 button landscape mode is wrecked. Fixit!
         if (mDeviceState.isGesturalNavMode()) {
             handleOrientationSetup(base);
         }
@@ -613,25 +610,10 @@ public class TouchInteractionService extends Service implements PluginListener<O
         if (TestProtocol.sDebugTracing) {
             Log.d(TestProtocol.PAUSE_NOT_DETECTED, "handleOrientationSetup.1");
         }
-        if (!isFixedRotationTransformEnabled(this)) {
+        if (!isFixedRotationTransformEnabled()) {
             return;
         }
         mDeviceState.enableMultipleRegions(baseInputConsumer instanceof OtherActivityInputConsumer);
-        BaseDraggingActivity activity =
-                mOverviewComponentObserver.getActivityInterface().getCreatedActivity();
-        if (TestProtocol.sDebugTracing) {
-            Log.d(TestProtocol.PAUSE_NOT_DETECTED, "handleOrientationSetup.2");
-        }
-        if (activity == null || !(activity.getOverviewPanel() instanceof RecentsView)) {
-            return;
-        }
-        if (TestProtocol.sDebugTracing) {
-            Log.d(TestProtocol.PAUSE_NOT_DETECTED, "handleOrientationSetup.3");
-        }
-        ((RecentsView) activity.getOverviewPanel())
-            .setLayoutRotation(mDeviceState.getCurrentActiveRotation(),
-                mDeviceState.getDisplayRotation());
-        activity.getDragLayer().recreateControllers();
     }
 
     private InputConsumer newBaseConsumer(GestureState previousGestureState,
@@ -705,7 +687,7 @@ public class TouchInteractionService extends Service implements PluginListener<O
     public InputConsumer createOverviewInputConsumer(GestureState previousGestureState,
             GestureState gestureState, MotionEvent event,
             boolean forceOverviewInputConsumer) {
-        BaseDraggingActivity activity = gestureState.getActivityInterface().getCreatedActivity();
+        StatefulActivity activity = gestureState.getActivityInterface().getCreatedActivity();
         if (activity == null) {
             return mResetGestureInputConsumer;
         }
@@ -754,7 +736,7 @@ public class TouchInteractionService extends Service implements PluginListener<O
             return;
         }
 
-        final BaseActivityInterface<BaseDraggingActivity> activityInterface =
+        final BaseActivityInterface activityInterface =
                 mOverviewComponentObserver.getActivityInterface();
         final Intent overviewIntent = new Intent(
                 mOverviewComponentObserver.getOverviewIntentIgnoreSysUiState());
@@ -849,16 +831,16 @@ public class TouchInteractionService extends Service implements PluginListener<O
         }
     }
 
-    private BaseSwipeUpHandler createLauncherSwipeHandler(GestureState gestureState,
-            long touchTimeMs, boolean continuingLastGesture, boolean isLikelyToStartNewTask) {
-        return new LauncherSwipeHandler(this, mDeviceState, mTaskAnimationManager,
+    private BaseSwipeUpHandler createLauncherSwipeHandler(
+            GestureState gestureState, long touchTimeMs, boolean continuingLastGesture) {
+        return new LauncherSwipeHandlerV2(this, mDeviceState, mTaskAnimationManager,
                 gestureState, touchTimeMs, continuingLastGesture, mInputConsumer);
     }
 
-    private BaseSwipeUpHandler createFallbackSwipeHandler(GestureState gestureState,
-            long touchTimeMs, boolean continuingLastGesture, boolean isLikelyToStartNewTask) {
-        return new FallbackSwipeHandler(this, mDeviceState, gestureState,
-                mInputConsumer, isLikelyToStartNewTask, continuingLastGesture);
+    private BaseSwipeUpHandler createFallbackSwipeHandler(
+            GestureState gestureState, long touchTimeMs, boolean continuingLastGesture) {
+        return new FallbackSwipeHandler(this, mDeviceState, mTaskAnimationManager,
+                gestureState, touchTimeMs, continuingLastGesture, mInputConsumer);
     }
 
     protected boolean shouldNotifyBackGesture() {

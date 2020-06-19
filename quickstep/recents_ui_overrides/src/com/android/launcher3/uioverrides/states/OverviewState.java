@@ -19,6 +19,7 @@ import static com.android.launcher3.anim.Interpolators.DEACCEL_2;
 import static com.android.launcher3.config.FeatureFlags.ENABLE_OVERVIEW_ACTIONS;
 import static com.android.launcher3.logging.LoggerUtils.newContainerTarget;
 import static com.android.quickstep.SysUINavigationMode.Mode.NO_BUTTON;
+import static com.android.quickstep.SysUINavigationMode.hideShelfInTwoButtonLandscape;
 import static com.android.quickstep.SysUINavigationMode.removeShelfFromOverview;
 
 import android.content.Context;
@@ -127,7 +128,9 @@ public class OverviewState extends LauncherState {
 
     @Override
     public int getVisibleElements(Launcher launcher) {
-        if (ENABLE_OVERVIEW_ACTIONS.get() && removeShelfFromOverview(launcher)) {
+        RecentsView recentsView = launcher.getOverviewPanel();
+        if (ENABLE_OVERVIEW_ACTIONS.get() && removeShelfFromOverview(launcher) ||
+                hideShelfInTwoButtonLandscape(launcher, recentsView.getPagedOrientationHandler())) {
             return OVERVIEW_BUTTONS;
         } else if (launcher.getDeviceProfile().isVerticalBarLayout()) {
             return VERTICAL_SWIPE_INDICATOR | OVERVIEW_BUTTONS;

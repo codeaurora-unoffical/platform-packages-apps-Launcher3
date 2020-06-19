@@ -239,7 +239,7 @@ public class StateManager<STATE_TYPE extends BaseState<STATE_TYPE>> {
                 ? fromState.getTransitionDuration(mActivity)
                 : state.getTransitionDuration(mActivity);
         prepareForAtomicAnimation(fromState, state, mConfig);
-        AnimatorSet animation = createAnimationToNewWorkspaceInternal(state).getAnim();
+        AnimatorSet animation = createAnimationToNewWorkspaceInternal(state).buildAnim();
         if (onCompleteRunnable != null) {
             animation.addListener(AnimationSuccessListener.forRunnable(onCompleteRunnable));
         }
@@ -267,7 +267,7 @@ public class StateManager<STATE_TYPE extends BaseState<STATE_TYPE>> {
         for (StateHandler handler : mActivity.getStateManager().getStateHandlers()) {
             handler.setStateWithAnimation(toState, config, builder);
         }
-        return builder.getAnim();
+        return builder.buildAnim();
     }
 
     /**
@@ -306,10 +306,12 @@ public class StateManager<STATE_TYPE extends BaseState<STATE_TYPE>> {
                     + state);
         }
         PendingAnimation builder = new PendingAnimation(mConfig.duration);
-        for (StateHandler handler : getStateHandlers()) {
-            handler.setStateWithAnimation(state, mConfig, builder);
+        if (mConfig.getAnimComponents() != 0) {
+            for (StateHandler handler : getStateHandlers()) {
+                handler.setStateWithAnimation(state, mConfig, builder);
+            }
         }
-        builder.getAnim().addListener(new AnimationSuccessListener() {
+        builder.addListener(new AnimationSuccessListener() {
 
             @Override
             public void onAnimationStart(Animator animation) {
@@ -325,7 +327,7 @@ public class StateManager<STATE_TYPE extends BaseState<STATE_TYPE>> {
                 onStateTransitionEnd(state);
             }
         });
-        mConfig.setAnimation(builder.getAnim(), state);
+        mConfig.setAnimation(builder.buildAnim(), state);
         return builder;
     }
 
@@ -553,6 +555,8 @@ public class StateManager<STATE_TYPE extends BaseState<STATE_TYPE>> {
      * Factory class to configure and create atomic animations.
      */
     public static class AtomicAnimationFactory<STATE_TYPE> {
+
+        protected static final int NEXT_INDEX = 0;
 
         private final Animator[] mStateElementAnimators;
 

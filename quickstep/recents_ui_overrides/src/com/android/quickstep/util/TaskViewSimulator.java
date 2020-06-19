@@ -15,24 +15,26 @@
  */
 package com.android.quickstep.util;
 
-import static android.view.Surface.ROTATION_0;
-
 import static com.android.launcher3.states.RotationHelper.deltaRotation;
 import static com.android.launcher3.touch.PagedOrientationHandler.MATRIX_POST_TRANSLATE;
 import static com.android.quickstep.util.RecentsOrientedState.postDisplayRotation;
 import static com.android.systemui.shared.system.WindowManagerWrapper.WINDOWING_MODE_FULLSCREEN;
 
+import android.animation.TimeInterpolator;
 import android.content.Context;
 import android.graphics.Matrix;
 import android.graphics.PointF;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.util.IntProperty;
 
 import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.R;
 import com.android.launcher3.Utilities;
+import com.android.launcher3.anim.PendingAnimation;
 import com.android.launcher3.touch.PagedOrientationHandler;
 import com.android.quickstep.AnimatedFloat;
+import com.android.quickstep.BaseActivityInterface;
 import com.android.quickstep.views.RecentsView.ScrollState;
 import com.android.quickstep.views.TaskThumbnailView.PreviewPositionHelper;
 import com.android.quickstep.views.TaskView;
@@ -46,13 +48,26 @@ import com.android.systemui.shared.system.SyncRtSurfaceTransactionApplierCompat.
  */
 public class TaskViewSimulator implements TransformParams.BuilderProxy {
 
+    public static final IntProperty<TaskViewSimulator> SCROLL =
+            new IntProperty<TaskViewSimulator>("scroll") {
+        @Override
+        public void setValue(TaskViewSimulator simulator, int i) {
+            simulator.setScroll(i);
+        }
+
+        @Override
+        public Integer get(TaskViewSimulator simulator) {
+            return simulator.mScrollState.scroll;
+        }
+    };
+
     private final Rect mTmpCropRect = new Rect();
     private final RectF mTempRectF = new RectF();
     private final float[] mTempPoint = new float[2];
 
     private final RecentsOrientedState mOrientationState;
     private final Context mContext;
-    private final WindowSizeStrategy mSizeStrategy;
+    private final BaseActivityInterface mSizeStrategy;
 
     private final Rect mTaskRect = new Rect();
     private final PointF mPivot = new PointF();
@@ -72,8 +87,8 @@ public class TaskViewSimulator implements TransformParams.BuilderProxy {
     private float mCurveScale = 1;
 
     // RecentsView properties
-    public final AnimatedFloat recentsViewScale = new AnimatedFloat(() -> { });
-    public final AnimatedFloat fullScreenProgress = new AnimatedFloat(() -> { });
+    public final AnimatedFloat recentsViewScale = new AnimatedFloat();
+    public final AnimatedFloat fullScreenProgress = new AnimatedFloat();
     private final ScrollState mScrollState = new ScrollState();
     private final int mPageSpacing;
 
@@ -81,7 +96,7 @@ public class TaskViewSimulator implements TransformParams.BuilderProxy {
     private boolean mLayoutValid = false;
     private boolean mScrollValid = false;
 
-    public TaskViewSimulator(Context context, WindowSizeStrategy sizeStrategy) {
+    public TaskViewSimulator(Context context, BaseActivityInterface sizeStrategy) {
         mContext = context;
         mSizeStrategy = sizeStrategy;
 
@@ -115,7 +130,8 @@ public class TaskViewSimulator implements TransformParams.BuilderProxy {
         if (mDp == null) {
             return 1;
         }
-        mSizeStrategy.calculateTaskSize(mContext, mDp, mTaskRect);
+        mSizeStrategy.calculateTaskSize(mContext, mDp, mTaskRect,
+                mOrientationState.getOrientationHandler());
         return mOrientationState.getFullScreenScaleAndPivot(mTaskRect, mDp, mPivot);
     }
 
@@ -130,8 +146,6 @@ public class TaskViewSimulator implements TransformParams.BuilderProxy {
         mThumbnailData.windowingMode = WINDOWING_MODE_FULLSCREEN;
 
         mThumbnailPosition.set(runningTarget.screenSpaceBounds);
-        // TODO: Should sourceContainerBounds already have this offset?
-        mThumbnailPosition.offset(-mRunningTarget.position.x, -mRunningTarget.position.y);
         mLayoutValid = false;
     }
 
@@ -143,6 +157,14 @@ public class TaskViewSimulator implements TransformParams.BuilderProxy {
             mScrollState.scroll = scroll;
             mScrollValid = false;
         }
+    }
+
+    /**
+     * Adds animation for all the components corresponding to transition from an app to overview
+     */
+    public void addAppToOverviewAnim(PendingAnimation pa, TimeInterpolator interpolator) {
+        pa.addFloat(fullScreenProgress, AnimatedFloat.VALUE, 1, 0, interpolator);
+        pa.addFloat(recentsViewScale, AnimatedFloat.VALUE, getFullScreenScale(), 1, interpolator);
     }
 
     /**
@@ -251,14 +273,11 @@ public class TaskViewSimulator implements TransformParams.BuilderProxy {
     }
 
     @Override
-    public void onBuildParams(Builder builder, RemoteAnimationTargetCompat app,
-            int targetMode, TransformParams params) {
-        if (app.mode == targetMode
-                && app.activityType != RemoteAnimationTargetCompat.ACTIVITY_TYPE_HOME) {
-            builder.withMatrix(mMatrix)
-                    .withWindowCrop(mTmpCropRect)
-                    .withCornerRadius(getCurrentCornerRadius());
-        }
+    public void onBuildTargetParams(
+            Builder builder, RemoteAnimationTargetCompat app, TransformParams params) {
+        builder.withMatrix(mMatrix)
+                .withWindowCrop(mTmpCropRect)
+                .withCornerRadius(getCurrentCornerRadius());
     }
 
     /**
@@ -274,4 +293,5 @@ public class TaskViewSimulator implements TransformParams.BuilderProxy {
         // Ideally we should use square-root. This is an optimization as one of the dimension is 0.
         return Math.max(Math.abs(mTempPoint[0]), Math.abs(mTempPoint[1]));
     }
+
 }

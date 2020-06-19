@@ -25,7 +25,6 @@ import static com.android.launcher3.LauncherState.SPRING_LOADED;
 import static com.android.launcher3.QuickstepAppTransitionManagerImpl.ALL_APPS_PROGRESS_OFF_SCREEN;
 import static com.android.launcher3.allapps.AllAppsTransitionController.ALL_APPS_PROGRESS;
 import static com.android.launcher3.config.FeatureFlags.ENABLE_QUICKSTEP_LIVE_TILE;
-import static com.android.quickstep.util.WindowSizeStrategy.LAUNCHER_ACTIVITY_SIZE_STRATEGY;
 
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
@@ -47,6 +46,7 @@ import com.android.launcher3.statemanager.StateManager.StateListener;
 import com.android.launcher3.uioverrides.plugins.PluginManagerWrapper;
 import com.android.launcher3.util.TraceHelper;
 import com.android.launcher3.views.ScrimView;
+import com.android.quickstep.LauncherActivityInterface;
 import com.android.quickstep.SysUINavigationMode;
 import com.android.quickstep.util.TransformParams;
 import com.android.systemui.plugins.PluginListener;
@@ -89,7 +89,7 @@ public class LauncherRecentsView extends RecentsView<BaseQuickstepLauncher>
     }
 
     public LauncherRecentsView(Context context, AttributeSet attrs, int defStyleAttr) {
-        super(context, attrs, defStyleAttr, LAUNCHER_ACTIVITY_SIZE_STRATEGY);
+        super(context, attrs, defStyleAttr, LauncherActivityInterface.INSTANCE);
         mActivity.getStateManager().addStateListener(this);
     }
 
@@ -157,9 +157,8 @@ public class LauncherRecentsView extends RecentsView<BaseQuickstepLauncher>
         if (ENABLE_QUICKSTEP_LIVE_TILE.get()) {
             if (tv.isRunningTask()) {
                 mTransformParams.setProgress(1 - progress)
-                        .setCurrentRect(null)
                         .setSyncTransactionApplier(mSyncTransactionApplier);
-                mAppWindowAnimationHelper.applyTransform(mTransformParams);
+                // TODO: Revisit live tiles
             } else {
                 redrawLiveTile(true);
             }
@@ -191,18 +190,10 @@ public class LauncherRecentsView extends RecentsView<BaseQuickstepLauncher>
     }
 
     @Override
-    public void redrawLiveTile(boolean mightNeedToRefill) {
-        TransformParams transformParams = getLiveTileParams(mightNeedToRefill);
-        if (transformParams != null) {
-            mAppWindowAnimationHelper.applyTransform(transformParams);
-        }
-    }
-
-    @Override
     public TransformParams getLiveTileParams(
             boolean mightNeedToRefill) {
         if (!mEnableDrawingLiveTile || mRecentsAnimationController == null
-                || mRecentsAnimationTargets == null || mAppWindowAnimationHelper == null) {
+                || mRecentsAnimationTargets == null) {
             return null;
         }
         TaskView taskView = getRunningTaskView();
@@ -222,9 +213,7 @@ public class LauncherRecentsView extends RecentsView<BaseQuickstepLauncher>
             if (mightNeedToRefill && offsetY > 0) {
                 mTempRect.top -= offsetY;
             }
-            mTempRectF.set(mTempRect);
             mTransformParams.setProgress(1f)
-                    .setCurrentRect(mTempRectF)
                     .setTargetAlpha(taskView.getAlpha())
                     .setSyncTransactionApplier(mSyncTransactionApplier)
                     .setTargetSet(mRecentsAnimationTargets);
