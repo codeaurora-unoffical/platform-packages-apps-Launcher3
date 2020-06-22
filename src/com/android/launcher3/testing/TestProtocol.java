@@ -28,10 +28,11 @@ public final class TestProtocol {
     public static final int SPRING_LOADED_STATE_ORDINAL = 1;
     public static final int OVERVIEW_STATE_ORDINAL = 2;
     public static final int OVERVIEW_PEEK_STATE_ORDINAL = 3;
-    public static final int QUICK_SWITCH_STATE_ORDINAL = 4;
-    public static final int ALL_APPS_STATE_ORDINAL = 5;
-    public static final int BACKGROUND_APP_STATE_ORDINAL = 6;
-    public static final int HINT_STATE_ORDINAL = 7;
+    public static final int OVERVIEW_MODAL_TASK_STATE_ORDINAL = 4;
+    public static final int QUICK_SWITCH_STATE_ORDINAL = 5;
+    public static final int ALL_APPS_STATE_ORDINAL = 6;
+    public static final int BACKGROUND_APP_STATE_ORDINAL = 7;
+    public static final int HINT_STATE_ORDINAL = 8;
     public static final String TAPL_EVENTS_TAG = "TaplEvents";
     public static final String SEQUENCE_MAIN = "Main";
     public static final String SEQUENCE_TIS = "TIS";
@@ -47,6 +48,8 @@ public final class TestProtocol {
                 return "Overview";
             case OVERVIEW_PEEK_STATE_ORDINAL:
                 return "OverviewPeek";
+            case OVERVIEW_MODAL_TASK_STATE_ORDINAL:
+                return "OverviewModal";
             case QUICK_SWITCH_STATE_ORDINAL:
                 return "QuickSwitch";
             case ALL_APPS_STATE_ORDINAL:
@@ -56,7 +59,7 @@ public final class TestProtocol {
             case HINT_STATE_ORDINAL:
                 return "Hint";
             default:
-                return null;
+                return "Unknown";
         }
     }
 
@@ -96,9 +99,7 @@ public final class TestProtocol {
     public static final String REQUEST_MOCK_SENSOR_ROTATION = "mock-sensor-rotation";
 
     public static final String PERMANENT_DIAG_TAG = "TaplTarget";
-
-    public static final String NO_BACKGROUND_TO_OVERVIEW_TAG = "b/138251824";
-    public static final String APP_NOT_DISABLED = "b/139891609";
-    public static final String NO_SCROLL_END_WIDGETS = "b/152354290";
-    public static final String NO_START_FROM_RECENTS = "b/152658211";
+    public static final String PAUSE_NOT_DETECTED = "b/139891609";
+    public static final String OVERIEW_NOT_ALLAPPS = "b/156095088";
+    public static final String NO_SWIPE_TO_HOME = "b/158017601";
 }

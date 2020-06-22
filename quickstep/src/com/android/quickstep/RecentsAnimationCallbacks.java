@@ -19,13 +19,11 @@ import static com.android.launcher3.util.Executors.MAIN_EXECUTOR;
 
 import android.graphics.Rect;
 import android.util.ArraySet;
-import android.util.Log;
 
 import androidx.annotation.BinderThread;
 import androidx.annotation.UiThread;
 
 import com.android.launcher3.Utilities;
-import com.android.launcher3.testing.TestProtocol;
 import com.android.launcher3.util.Preconditions;
 import com.android.systemui.shared.recents.model.ThumbnailData;
 import com.android.systemui.shared.system.RecentsAnimationControllerCompat;
@@ -41,15 +39,15 @@ public class RecentsAnimationCallbacks implements
         com.android.systemui.shared.system.RecentsAnimationListener {
 
     private final Set<RecentsAnimationListener> mListeners = new ArraySet<>();
-    private final boolean mShouldMinimizeSplitScreen;
+    private final boolean mAllowMinimizeSplitScreen;
 
     // TODO(141886704): Remove these references when they are no longer needed
     private RecentsAnimationController mController;
 
     private boolean mCancelled;
 
-    public RecentsAnimationCallbacks(boolean shouldMinimizeSplitScreen) {
-        mShouldMinimizeSplitScreen = shouldMinimizeSplitScreen;
+    public RecentsAnimationCallbacks(boolean allowMinimizeSplitScreen) {
+        mAllowMinimizeSplitScreen = allowMinimizeSplitScreen;
     }
 
     @UiThread
@@ -91,13 +89,10 @@ public class RecentsAnimationCallbacks implements
             RemoteAnimationTargetCompat[] appTargets,
             RemoteAnimationTargetCompat[] wallpaperTargets,
             Rect homeContentInsets, Rect minimizedHomeBounds) {
-        if (TestProtocol.sDebugTracing) {
-            Log.d(TestProtocol.NO_START_FROM_RECENTS, "onAnimationStart");
-        }
         RecentsAnimationTargets targets = new RecentsAnimationTargets(appTargets,
                 wallpaperTargets, homeContentInsets, minimizedHomeBounds);
         mController = new RecentsAnimationController(animationController,
-                mShouldMinimizeSplitScreen, this::onAnimationFinished);
+                mAllowMinimizeSplitScreen, this::onAnimationFinished);
 
         if (mCancelled) {
             Utilities.postAsyncCallback(MAIN_EXECUTOR.getHandler(),
@@ -117,6 +112,16 @@ public class RecentsAnimationCallbacks implements
         Utilities.postAsyncCallback(MAIN_EXECUTOR.getHandler(), () -> {
             for (RecentsAnimationListener listener : getListeners()) {
                 listener.onRecentsAnimationCanceled(thumbnailData);
+            }
+        });
+    }
+
+    @BinderThread
+    @Override
+    public void onTaskAppeared(RemoteAnimationTargetCompat app) {
+        Utilities.postAsyncCallback(MAIN_EXECUTOR.getHandler(), () -> {
+            for (RecentsAnimationListener listener : getListeners()) {
+                listener.onTaskAppeared(app);
             }
         });
     }
@@ -150,5 +155,10 @@ public class RecentsAnimationCallbacks implements
          * Callback made whenever the recents animation is finished.
          */
         default void onRecentsAnimationFinished(RecentsAnimationController controller) {}
+
+        /**
+         * Callback made when a task started from the recents is ready for an app transition.
+         */
+        default void onTaskAppeared(RemoteAnimationTargetCompat appearedTaskTarget) {}
     }
 }

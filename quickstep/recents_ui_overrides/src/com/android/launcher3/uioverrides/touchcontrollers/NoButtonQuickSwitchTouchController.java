@@ -16,10 +16,10 @@
 package com.android.launcher3.uioverrides.touchcontrollers;
 
 import static com.android.launcher3.LauncherAnimUtils.SCALE_PROPERTY;
-import static com.android.launcher3.LauncherAppTransitionManagerImpl.INDEX_PAUSE_TO_OVERVIEW_ANIM;
 import static com.android.launcher3.LauncherState.HOTSEAT_ICONS;
 import static com.android.launcher3.LauncherState.NORMAL;
 import static com.android.launcher3.LauncherState.OVERVIEW;
+import static com.android.launcher3.LauncherState.OVERVIEW_BUTTONS;
 import static com.android.launcher3.LauncherState.QUICK_SWITCH;
 import static com.android.launcher3.anim.AlphaUpdateListener.ALPHA_CUTOFF_THRESHOLD;
 import static com.android.launcher3.anim.Interpolators.ACCEL_0_75;
@@ -35,22 +35,21 @@ import static com.android.launcher3.states.StateAnimationConfig.ANIM_WORKSPACE_T
 import static com.android.launcher3.states.StateAnimationConfig.SKIP_OVERVIEW;
 import static com.android.launcher3.touch.BothAxesSwipeDetector.DIRECTION_RIGHT;
 import static com.android.launcher3.touch.BothAxesSwipeDetector.DIRECTION_UP;
+import static com.android.launcher3.uioverrides.states.QuickstepAtomicAnimationFactory.INDEX_PAUSE_TO_OVERVIEW_ANIM;
 import static com.android.launcher3.util.DefaultDisplay.getSingleFrameMs;
 import static com.android.launcher3.util.VibratorWrapper.OVERVIEW_HAPTIC;
 import static com.android.quickstep.util.ShelfPeekAnim.ShelfAnimState.CANCEL;
 import static com.android.quickstep.util.ShelfPeekAnim.ShelfAnimState.HIDE;
 import static com.android.quickstep.util.ShelfPeekAnim.ShelfAnimState.PEEK;
+import static com.android.quickstep.views.RecentsView.ADJACENT_PAGE_OFFSET;
 import static com.android.quickstep.views.RecentsView.FULLSCREEN_PROGRESS;
 import static com.android.systemui.shared.system.QuickStepContract.SYSUI_STATE_OVERVIEW_DISABLED;
 
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
-import android.animation.AnimatorSet;
-import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
 import android.graphics.PointF;
 import android.view.MotionEvent;
-import android.view.View;
 import android.view.animation.Interpolator;
 
 import com.android.launcher3.BaseQuickstepLauncher;
@@ -59,6 +58,7 @@ import com.android.launcher3.R;
 import com.android.launcher3.Utilities;
 import com.android.launcher3.allapps.AllAppsTransitionController;
 import com.android.launcher3.anim.AnimatorPlaybackController;
+import com.android.launcher3.anim.PendingAnimation;
 import com.android.launcher3.config.FeatureFlags;
 import com.android.launcher3.graphics.OverviewScrim;
 import com.android.launcher3.states.StateAnimationConfig;
@@ -117,7 +117,7 @@ public class NoButtonQuickSwitchTouchController implements TouchController,
         mRecentsView = mLauncher.getOverviewPanel();
         mXRange = mLauncher.getDeviceProfile().widthPx / 2f;
         mYRange = LayoutUtils.getShelfTrackingDistance(
-            mLauncher, mLauncher.getDeviceProfile());
+            mLauncher, mLauncher.getDeviceProfile(), mRecentsView.getPagedOrientationHandler());
         mMotionPauseDetector = new MotionPauseDetector(mLauncher);
         mMotionPauseMinDisplacement = mLauncher.getResources().getDimension(
                 R.dimen.motion_pause_detector_min_displacement_from_app);
@@ -237,58 +237,34 @@ public class NoButtonQuickSwitchTouchController implements TouchController,
     private void setupOverviewAnimators() {
         final LauncherState fromState = QUICK_SWITCH;
         final LauncherState toState = OVERVIEW;
-        LauncherState.ScaleAndTranslation fromScaleAndTranslation = fromState
-                .getOverviewScaleAndTranslation(mLauncher);
-        LauncherState.ScaleAndTranslation toScaleAndTranslation = toState
-                .getOverviewScaleAndTranslation(mLauncher);
-        // Update RecentView's translationX to have it start offscreen.
-        float startScale = Utilities.mapRange(
-                SCALE_DOWN_INTERPOLATOR.getInterpolation(Y_ANIM_MIN_PROGRESS),
-                fromScaleAndTranslation.scale,
-                toScaleAndTranslation.scale);
-        fromScaleAndTranslation.translationX = mRecentsView.getOffscreenTranslationX(startScale);
 
         // Set RecentView's initial properties.
-        mRecentsView.setScaleX(fromScaleAndTranslation.scale);
-        mRecentsView.setScaleY(fromScaleAndTranslation.scale);
-        mRecentsView.setTranslationX(fromScaleAndTranslation.translationX);
-        mRecentsView.setTranslationY(fromScaleAndTranslation.translationY);
+        SCALE_PROPERTY.set(mRecentsView, fromState.getOverviewScaleAndOffset(mLauncher)[0]);
+        ADJACENT_PAGE_OFFSET.set(mRecentsView, 1f);
         mRecentsView.setContentAlpha(1);
         mRecentsView.setFullscreenProgress(fromState.getOverviewFullscreenProgress());
+        mLauncher.getActionsView().getVisibilityAlpha().setValue(
+                (fromState.getVisibleElements(mLauncher) & OVERVIEW_BUTTONS) != 0 ? 1f : 0f);
 
+        float[] scaleAndOffset = toState.getOverviewScaleAndOffset(mLauncher);
         // As we drag right, animate the following properties:
         //   - RecentsView translationX
         //   - OverviewScrim
-        AnimatorSet xOverviewAnim = new AnimatorSet();
-        xOverviewAnim.play(ObjectAnimator.ofFloat(mRecentsView, View.TRANSLATION_X,
-                toScaleAndTranslation.translationX));
-        xOverviewAnim.play(ObjectAnimator.ofFloat(
-                mLauncher.getDragLayer().getOverviewScrim(), OverviewScrim.SCRIM_PROGRESS,
-                toState.getOverviewScrimAlpha(mLauncher)));
-        long xAccuracy = (long) (mXRange * 2);
-        xOverviewAnim.setDuration(xAccuracy);
-        mXOverviewAnim = AnimatorPlaybackController.wrap(xOverviewAnim, xAccuracy);
+        PendingAnimation xAnim = new PendingAnimation((long) (mXRange * 2));
+        xAnim.setFloat(mRecentsView, ADJACENT_PAGE_OFFSET, scaleAndOffset[1], LINEAR);
+        xAnim.setFloat(mLauncher.getDragLayer().getOverviewScrim(), OverviewScrim.SCRIM_PROGRESS,
+                toState.getOverviewScrimAlpha(mLauncher), LINEAR);
+        mXOverviewAnim = xAnim.createPlaybackController();
         mXOverviewAnim.dispatchOnStart();
 
         // As we drag up, animate the following properties:
-        //   - RecentsView translationY
         //   - RecentsView scale
         //   - RecentsView fullscreenProgress
-        AnimatorSet yAnimation = new AnimatorSet();
-        Animator translateYAnim = ObjectAnimator.ofFloat(mRecentsView, View.TRANSLATION_Y,
-                toScaleAndTranslation.translationY);
-        Animator scaleAnim = ObjectAnimator.ofFloat(mRecentsView, SCALE_PROPERTY,
-                toScaleAndTranslation.scale);
-        Animator fullscreenProgressAnim = ObjectAnimator.ofFloat(mRecentsView, FULLSCREEN_PROGRESS,
-                fromState.getOverviewFullscreenProgress(), toState.getOverviewFullscreenProgress());
-        scaleAnim.setInterpolator(SCALE_DOWN_INTERPOLATOR);
-        fullscreenProgressAnim.setInterpolator(SCALE_DOWN_INTERPOLATOR);
-        yAnimation.play(translateYAnim);
-        yAnimation.play(scaleAnim);
-        yAnimation.play(fullscreenProgressAnim);
-        long yAccuracy = (long) (mYRange * 2);
-        yAnimation.setDuration(yAccuracy);
-        mYOverviewAnim = AnimatorPlaybackController.wrap(yAnimation, yAccuracy);
+        PendingAnimation yAnim = new PendingAnimation((long) (mYRange * 2));
+        yAnim.setFloat(mRecentsView, SCALE_PROPERTY, scaleAndOffset[0], SCALE_DOWN_INTERPOLATOR);
+        yAnim.setFloat(mRecentsView, FULLSCREEN_PROGRESS,
+                toState.getOverviewFullscreenProgress(), SCALE_DOWN_INTERPOLATOR);
+        mYOverviewAnim = yAnim.createPlaybackController();
         mYOverviewAnim.dispatchOnStart();
     }
 
@@ -339,8 +315,8 @@ public class NoButtonQuickSwitchTouchController implements TouchController,
         if (mMotionPauseDetector.isPaused() && noFling) {
             cancelAnimations();
 
-            Animator overviewAnim = mLauncher.getAppTransitionManager().createStateElementAnimation(
-                    INDEX_PAUSE_TO_OVERVIEW_ANIM);
+            Animator overviewAnim = mLauncher.createAtomicAnimationFactory()
+                    .createStateElementAnimation(INDEX_PAUSE_TO_OVERVIEW_ANIM);
             overviewAnim.addListener(new AnimatorListenerAdapter() {
                 @Override
                 public void onAnimationEnd(Animator animation) {

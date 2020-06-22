@@ -37,6 +37,7 @@ public class StateAnimationConfig {
             PLAY_ATOMIC_OVERVIEW_SCALE,
             PLAY_ATOMIC_OVERVIEW_PEEK,
             SKIP_OVERVIEW,
+            SKIP_DEPTH_CONTROLLER
     })
     @Retention(RetentionPolicy.SOURCE)
     public @interface AnimationFlags {}
@@ -44,6 +45,7 @@ public class StateAnimationConfig {
     public static final int PLAY_ATOMIC_OVERVIEW_SCALE = 1 << 1;
     public static final int PLAY_ATOMIC_OVERVIEW_PEEK = 1 << 2;
     public static final int SKIP_OVERVIEW = 1 << 3;
+    public static final int SKIP_DEPTH_CONTROLLER = 1 << 4;
 
     public long duration;
     public boolean userControlled;
@@ -67,6 +69,8 @@ public class StateAnimationConfig {
             ANIM_ALL_APPS_FADE,
             ANIM_OVERVIEW_SCRIM_FADE,
             ANIM_ALL_APPS_HEADER_FADE,
+            ANIM_OVERVIEW_MODAL,
+            ANIM_DEPTH,
     })
     @Retention(RetentionPolicy.SOURCE)
     public @interface AnimType {}
@@ -83,8 +87,10 @@ public class StateAnimationConfig {
     public static final int ANIM_ALL_APPS_FADE = 10;
     public static final int ANIM_OVERVIEW_SCRIM_FADE = 11;
     public static final int ANIM_ALL_APPS_HEADER_FADE = 12; // e.g. predictions
+    public static final int ANIM_OVERVIEW_MODAL = 13;
+    public static final int ANIM_DEPTH = 14;
 
-    private static final int ANIM_TYPES_COUNT = 13;
+    private static final int ANIM_TYPES_COUNT = 15;
 
     private final Interpolator[] mInterpolators = new Interpolator[ANIM_TYPES_COUNT];
 

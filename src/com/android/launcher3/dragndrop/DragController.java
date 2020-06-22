@@ -37,11 +37,11 @@ import android.view.View;
 import com.android.launcher3.AbstractFloatingView;
 import com.android.launcher3.DragSource;
 import com.android.launcher3.DropTarget;
-import com.android.launcher3.ItemInfo;
 import com.android.launcher3.Launcher;
 import com.android.launcher3.R;
-import com.android.launcher3.WorkspaceItemInfo;
 import com.android.launcher3.accessibility.DragViewStateAnnouncer;
+import com.android.launcher3.model.data.ItemInfo;
+import com.android.launcher3.model.data.WorkspaceItemInfo;
 import com.android.launcher3.util.ItemInfoMatcher;
 import com.android.launcher3.util.TouchController;
 
@@ -186,8 +186,7 @@ public class DragController implements DragDriver.EventListener, TouchController
 
         mDragObject.dragSource = source;
         mDragObject.dragInfo = dragInfo;
-        mDragObject.originalDragInfo = new ItemInfo();
-        mDragObject.originalDragInfo.copyFrom(dragInfo);
+        mDragObject.originalDragInfo = mDragObject.dragInfo.makeShallowCopy();
 
         if (dragOffset != null) {
             dragView.setDragVisualizeOffset(new Point(dragOffset));

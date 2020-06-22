@@ -62,10 +62,10 @@ import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.Insettable;
 import com.android.launcher3.Launcher;
 import com.android.launcher3.LauncherState;
-import com.android.launcher3.LauncherStateManager;
-import com.android.launcher3.LauncherStateManager.StateListener;
 import com.android.launcher3.R;
 import com.android.launcher3.Utilities;
+import com.android.launcher3.statemanager.StateManager;
+import com.android.launcher3.statemanager.StateManager.StateListener;
 import com.android.launcher3.uioverrides.WallpaperColorInfo;
 import com.android.launcher3.uioverrides.WallpaperColorInfo.OnChangeListener;
 import com.android.launcher3.userevent.nano.LauncherLogProto.Action;
@@ -82,7 +82,7 @@ import java.util.List;
  * Simple scrim which draws a flat color
  */
 public class ScrimView<T extends Launcher> extends View implements Insettable, OnChangeListener,
-        AccessibilityStateChangeListener, StateListener {
+        AccessibilityStateChangeListener {
 
     public static final IntProperty<ScrimView> DRAG_HANDLE_ALPHA =
             new IntProperty<ScrimView>("dragHandleAlpha") {
@@ -115,6 +115,16 @@ public class ScrimView<T extends Launcher> extends View implements Insettable, O
     private final WallpaperColorInfo mWallpaperColorInfo;
     private final AccessibilityManager mAM;
     protected final int mEndScrim;
+
+    private final StateListener<LauncherState> mAccessibilityLauncherStateListener =
+            new StateListener<LauncherState>() {
+        @Override
+        public void onStateTransitionComplete(LauncherState finalState) {
+            setImportantForAccessibility(finalState == ALL_APPS
+                    ? IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                    : IMPORTANT_FOR_ACCESSIBILITY_AUTO);
+        }
+    };
 
     protected float mMaxScrimAlpha;
 
@@ -177,7 +187,7 @@ public class ScrimView<T extends Launcher> extends View implements Insettable, O
     @Override
     public void setInsets(Rect insets) {
         updateDragHandleBounds();
-        updateDragHandleVisibility(null);
+        updateDragHandleVisibility();
     }
 
     @Override
@@ -374,19 +384,23 @@ public class ScrimView<T extends Launcher> extends View implements Insettable, O
 
     @Override
     public void onAccessibilityStateChanged(boolean enabled) {
-        LauncherStateManager stateManager = mLauncher.getStateManager();
-        stateManager.removeStateListener(this);
+        StateManager<LauncherState> stateManager = mLauncher.getStateManager();
+        stateManager.removeStateListener(mAccessibilityLauncherStateListener);
 
         if (enabled) {
-            stateManager.addStateListener(this);
-            handleStateChangedComplete(stateManager.getState());
+            stateManager.addStateListener(mAccessibilityLauncherStateListener);
+            mAccessibilityLauncherStateListener.onStateTransitionComplete(stateManager.getState());
         } else {
             setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         }
+        updateDragHandleVisibility();
+    }
+
+    public void updateDragHandleVisibility() {
         updateDragHandleVisibility(null);
     }
 
-    private void updateDragHandleVisibility(Drawable recycle) {
+    private void updateDragHandleVisibility(@Nullable Drawable recycle) {
         boolean visible = shouldDragHandleBeVisible();
         boolean wasVisible = mDragHandle != null;
         if (visible != wasVisible) {
@@ -422,20 +436,6 @@ public class ScrimView<T extends Launcher> extends View implements Insettable, O
             Rect previouslyFocusedRect) {
         super.onFocusChanged(gainFocus, direction, previouslyFocusedRect);
         mAccessibilityHelper.onFocusChanged(gainFocus, direction, previouslyFocusedRect);
-    }
-
-    @Override
-    public void onStateTransitionStart(LauncherState toState) {}
-
-    @Override
-    public void onStateTransitionComplete(LauncherState finalState) {
-        handleStateChangedComplete(finalState);
-    }
-
-    private void handleStateChangedComplete(LauncherState finalState) {
-        setImportantForAccessibility(finalState == ALL_APPS
-                ? IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-                : IMPORTANT_FOR_ACCESSIBILITY_AUTO);
     }
 
     protected class AccessibilityHelper extends ExploreByTouchHelper {

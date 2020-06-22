@@ -18,6 +18,7 @@ package com.android.quickstep;
 import static com.android.launcher3.util.Executors.MAIN_EXECUTOR;
 import static com.android.launcher3.util.Executors.UI_HELPER_EXECUTOR;
 import static com.android.quickstep.GestureState.STATE_RECENTS_ANIMATION_INITIALIZED;
+import static com.android.quickstep.GestureState.STATE_RECENTS_ANIMATION_STARTED;
 
 import android.content.Intent;
 import android.util.Log;
@@ -26,9 +27,9 @@ import androidx.annotation.UiThread;
 
 import com.android.launcher3.Utilities;
 import com.android.launcher3.config.FeatureFlags;
-import com.android.launcher3.testing.TestProtocol;
 import com.android.systemui.shared.recents.model.ThumbnailData;
 import com.android.systemui.shared.system.ActivityManagerWrapper;
+import com.android.systemui.shared.system.RemoteAnimationTargetCompat;
 
 public class TaskAnimationManager implements RecentsAnimationCallbacks.RecentsAnimationListener {
 
@@ -37,6 +38,7 @@ public class TaskAnimationManager implements RecentsAnimationCallbacks.RecentsAn
     private RecentsAnimationTargets mTargets;
     // Temporary until we can hook into gesture state events
     private GestureState mLastGestureState;
+    private RemoteAnimationTargetCompat mLastAppearedTaskTarget;
 
     /**
      * Preloads the recents animation.
@@ -53,9 +55,6 @@ public class TaskAnimationManager implements RecentsAnimationCallbacks.RecentsAn
     @UiThread
     public RecentsAnimationCallbacks startRecentsAnimation(GestureState gestureState,
             Intent intent, RecentsAnimationCallbacks.RecentsAnimationListener listener) {
-        if (TestProtocol.sDebugTracing) {
-            Log.d(TestProtocol.NO_START_FROM_RECENTS, "startRecentsAnimation");
-        }
         // Notify if recents animation is still running
         if (mController != null) {
             String msg = "New recents animation started before old animation completed";
@@ -70,13 +69,21 @@ public class TaskAnimationManager implements RecentsAnimationCallbacks.RecentsAn
 
         final BaseActivityInterface activityInterface = gestureState.getActivityInterface();
         mLastGestureState = gestureState;
-        mCallbacks = new RecentsAnimationCallbacks(activityInterface.shouldMinimizeSplitScreen());
+        mCallbacks = new RecentsAnimationCallbacks(activityInterface.allowMinimizeSplitScreen());
         mCallbacks.addListener(new RecentsAnimationCallbacks.RecentsAnimationListener() {
             @Override
             public void onRecentsAnimationStart(RecentsAnimationController controller,
                     RecentsAnimationTargets targets) {
+                if (mCallbacks == null) {
+                    // It's possible for the recents animation to have finished and be cleaned up
+                    // by the time we process the start callback, and in that case, just we can skip
+                    // handling this call entirely
+                    return;
+                }
                 mController = controller;
                 mTargets = targets;
+                mLastAppearedTaskTarget = mTargets.findTask(mLastGestureState.getRunningTaskId());
+                mLastGestureState.updateLastAppearedTaskTarget(mLastAppearedTaskTarget);
             }
 
             @Override
@@ -94,6 +101,20 @@ public class TaskAnimationManager implements RecentsAnimationCallbacks.RecentsAn
             public void onRecentsAnimationFinished(RecentsAnimationController controller) {
                 cleanUpRecentsAnimation(null /* canceledThumbnail */);
             }
+
+            @Override
+            public void onTaskAppeared(RemoteAnimationTargetCompat appearedTaskTarget) {
+                if (mController != null) {
+                    if (mLastAppearedTaskTarget == null
+                            || appearedTaskTarget.taskId != mLastAppearedTaskTarget.taskId) {
+                        if (mLastAppearedTaskTarget != null) {
+                            mController.removeTaskTarget(mLastAppearedTaskTarget);
+                        }
+                        mLastAppearedTaskTarget = appearedTaskTarget;
+                        mLastGestureState.updateLastAppearedTaskTarget(mLastAppearedTaskTarget);
+                    }
+                }
+            }
         });
         mCallbacks.addListener(gestureState);
         mCallbacks.addListener(listener);
@@ -110,6 +131,9 @@ public class TaskAnimationManager implements RecentsAnimationCallbacks.RecentsAn
         mCallbacks.removeListener(mLastGestureState);
         mLastGestureState = gestureState;
         mCallbacks.addListener(gestureState);
+        gestureState.setState(STATE_RECENTS_ANIMATION_INITIALIZED
+                | STATE_RECENTS_ANIMATION_STARTED);
+        gestureState.updateLastAppearedTaskTarget(mLastAppearedTaskTarget);
         return mCallbacks;
     }
 
@@ -169,6 +193,7 @@ public class TaskAnimationManager implements RecentsAnimationCallbacks.RecentsAn
         mCallbacks = null;
         mTargets = null;
         mLastGestureState = null;
+        mLastAppearedTaskTarget = null;
     }
 
     public void dump() {

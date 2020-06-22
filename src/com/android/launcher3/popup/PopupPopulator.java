@@ -16,6 +16,8 @@
 
 package com.android.launcher3.popup;
 
+import static com.android.launcher3.LauncherSettings.Favorites.CONTAINER_SHORTCUTS;
+
 import android.content.ComponentName;
 import android.content.pm.ShortcutInfo;
 import android.os.Handler;
@@ -25,10 +27,10 @@ import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
 import com.android.launcher3.BaseDraggingActivity;
-import com.android.launcher3.ItemInfo;
 import com.android.launcher3.LauncherAppState;
-import com.android.launcher3.WorkspaceItemInfo;
 import com.android.launcher3.icons.IconCache;
+import com.android.launcher3.model.data.ItemInfo;
+import com.android.launcher3.model.data.WorkspaceItemInfo;
 import com.android.launcher3.notification.NotificationInfo;
 import com.android.launcher3.notification.NotificationKeyData;
 import com.android.launcher3.notification.NotificationListener;
@@ -160,6 +162,7 @@ public class PopupPopulator {
                 final WorkspaceItemInfo si = new WorkspaceItemInfo(shortcut, launcher);
                 cache.getUnbadgedShortcutIcon(si, shortcut);
                 si.rank = i;
+                si.container = CONTAINER_SHORTCUTS;
 
                 final DeepShortcutView view = shortcutViews.get(i);
                 uiHandler.post(() -> view.applyShortcutInfo(si, shortcut, container));

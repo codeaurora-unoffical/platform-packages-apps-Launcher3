@@ -29,6 +29,7 @@ import com.android.launcher3.R;
 import com.android.launcher3.Utilities;
 import com.android.launcher3.anim.FlingSpringAnim;
 import com.android.launcher3.util.DynamicResource;
+import com.android.quickstep.RemoteAnimationTargets.ReleaseCheck;
 import com.android.systemui.plugins.ResourceProvider;
 
 import java.util.ArrayList;
@@ -39,7 +40,7 @@ import java.util.List;
  * Applies spring forces to animate from a starting rect to a target rect,
  * while providing update callbacks to the caller.
  */
-public class RectFSpringAnim {
+public class RectFSpringAnim extends ReleaseCheck {
 
     private static final FloatPropertyCompat<RectFSpringAnim> RECT_CENTER_X =
             new FloatPropertyCompat<RectFSpringAnim>("rectCenterXSpring") {
@@ -116,6 +117,7 @@ public class RectFSpringAnim {
         ResourceProvider rp = DynamicResource.provider(context);
         mMinVisChange = rp.getDimension(R.dimen.swipe_up_fling_min_visible_change);
         mYOvershoot = rp.getDimension(R.dimen.swipe_up_y_overshoot);
+        setCanRelease(true);
     }
 
     public void onTargetPositionChanged() {
@@ -190,10 +192,12 @@ public class RectFSpringAnim {
                     maybeOnEnd();
                 });
 
+        setCanRelease(false);
+        mAnimsStarted = true;
+
         mRectXAnim.start();
         mRectYAnim.start();
         mRectScaleAnim.start();
-        mAnimsStarted = true;
         for (Animator.AnimatorListener animatorListener : mAnimatorListeners) {
             animatorListener.onAnimationStart(null);
         }
@@ -207,9 +211,23 @@ public class RectFSpringAnim {
                 mRectScaleAnim.skipToEnd();
             }
         }
+        mRectXAnimEnded = true;
+        mRectYAnimEnded = true;
+        mRectScaleAnimEnded = true;
+        maybeOnEnd();
+    }
+
+    private boolean isEnded() {
+        return mRectXAnimEnded && mRectYAnimEnded && mRectScaleAnimEnded;
     }
 
     private void onUpdate() {
+        if (isEnded()) {
+            // Prevent further updates from being called. This can happen between callbacks for
+            // ending the x/y/scale animations.
+            return;
+        }
+
         if (!mOnUpdateListeners.isEmpty()) {
             float currentWidth = Utilities.mapRange(mCurrentScaleProgress, mStartRect.width(),
                     mTargetRect.width());
@@ -229,8 +247,9 @@ public class RectFSpringAnim {
     }
 
     private void maybeOnEnd() {
-        if (mAnimsStarted && mRectXAnimEnded && mRectYAnimEnded && mRectScaleAnimEnded) {
+        if (mAnimsStarted && isEnded()) {
             mAnimsStarted = false;
+            setCanRelease(true);
             for (Animator.AnimatorListener animatorListener : mAnimatorListeners) {
                 animatorListener.onAnimationEnd(null);
             }

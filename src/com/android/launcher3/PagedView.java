@@ -38,7 +38,6 @@ import android.util.Log;
 import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
-import android.view.Surface;
 import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
@@ -55,12 +54,10 @@ import androidx.annotation.Nullable;
 import com.android.launcher3.anim.Interpolators;
 import com.android.launcher3.compat.AccessibilityManagerCompat;
 import com.android.launcher3.config.FeatureFlags;
-import com.android.launcher3.model.PagedViewOrientedState;
 import com.android.launcher3.pageindicators.PageIndicator;
 import com.android.launcher3.touch.OverScroll;
 import com.android.launcher3.touch.PagedOrientationHandler;
 import com.android.launcher3.touch.PagedOrientationHandler.ChildBounds;
-import com.android.launcher3.touch.PortraitPagedViewHandler;
 import com.android.launcher3.util.OverScroller;
 import com.android.launcher3.util.Thunk;
 import com.android.launcher3.views.ActivityContext;
@@ -121,8 +118,7 @@ public abstract class PagedView<T extends View & PageIndicator> extends ViewGrou
     private float mLastMotion;
     private float mLastMotionRemainder;
     private float mTotalMotion;
-    protected PagedOrientationHandler mOrientationHandler = new PortraitPagedViewHandler();
-    protected final PagedViewOrientedState mOrientationState = new PagedViewOrientedState();
+    protected PagedOrientationHandler mOrientationHandler = PagedOrientationHandler.PORTRAIT;
 
     protected int[] mPageScrolls;
     private boolean mIsBeingDragged;
@@ -143,9 +139,6 @@ public abstract class PagedView<T extends View & PageIndicator> extends ViewGrou
     protected boolean mWasInOverscroll = false;
 
     protected int mUnboundedScroll;
-
-    protected int mLayoutRotation = Surface.ROTATION_0;
-    protected int mDisplayRotation = Surface.ROTATION_0;
 
     // Page Indicator
     @Thunk int mPageIndicatorViewId;
@@ -262,13 +255,6 @@ public abstract class PagedView<T extends View & PageIndicator> extends ViewGrou
         mOrientationHandler.set(this, VIEW_SCROLL_TO, newPosition);
         mOrientationHandler.scrollerStartScroll(mScroller, newPosition);
         forceFinishScroller(true);
-    }
-
-    /**
-     * Returns left offset of a page. This is the gap between pages and prevents overlap.
-     */
-    public int scrollOffsetLeft() {
-        return mInsets.left + getPaddingLeft();
     }
 
     private void abortScrollerAnimation(boolean resetNextPage) {
@@ -415,37 +401,6 @@ public abstract class PagedView<T extends View & PageIndicator> extends ViewGrou
 
     protected int getUnboundedScroll() {
         return mUnboundedScroll;
-    }
-
-    protected void updateLayoutRotation(int touchRotation) {
-        setLayoutRotation(touchRotation, mDisplayRotation);
-    }
-
-    /** @param touchRotation Must be one of {@link android.view.Surface.ROTATION_0/90/180/270} */
-    public void setLayoutRotation(int touchRotation, int displayRotation) {
-        if (mLayoutRotation == touchRotation && mDisplayRotation == displayRotation) {
-            return;
-        }
-
-        mOrientationState.update(touchRotation, displayRotation);
-        mOrientationHandler = mOrientationState.getOrientationHandler();
-        mLayoutRotation = touchRotation;
-        mDisplayRotation = displayRotation;
-        requestLayout();
-    }
-
-    public PagedViewOrientedState getPagedViewOrientedState() {
-        return mOrientationState;
-    }
-
-    public PagedOrientationHandler getPagedOrientationHandler() {
-        return getPagedViewOrientedState().getOrientationHandler();
-    }
-
-    public void disableMultipleLayoutRotations(boolean disable) {
-        mOrientationState.disableMultipleOrientations(disable);
-        mOrientationHandler = mOrientationState.getOrientationHandler();
-        requestLayout();
     }
 
     @Override
@@ -955,7 +910,7 @@ public abstract class PagedView<T extends View & PageIndicator> extends ViewGrou
                 // Remember location of down touch
                 mDownMotionX = x;
                 mDownMotionY = y;
-                mLastMotion = mOrientationHandler.getPrimaryDirection(ev, 0);
+                mDownMotionPrimary = mLastMotion = mOrientationHandler.getPrimaryDirection(ev, 0);
                 mLastMotionRemainder = 0;
                 mTotalMotion = 0;
                 mActivePointerId = ev.getPointerId(0);
@@ -1107,16 +1062,28 @@ public abstract class PagedView<T extends View & PageIndicator> extends ViewGrou
         }
     }
 
+    /**
+     * Returns the amount of overscroll caused by the spring in {@link OverScroller}.
+     */
+    private int getSpringOverScroll(int amount) {
+        if (mScroller.isSpringing()) {
+            return amount < 0
+                    ? mScroller.getCurrPos() - mMinScroll
+                    : Math.max(0, mScroller.getCurrPos() - mMaxScroll);
+        } else {
+            return 0;
+        }
+    }
+
     protected void dampedOverScroll(int amount) {
-        mSpringOverScroll = amount;
         if (amount == 0) {
             return;
         }
 
         int size = mOrientationHandler.getMeasuredSize(this);
         int overScrollAmount = OverScroll.dampedScroll(amount, size);
-        mSpringOverScroll = overScrollAmount;
         if (mScroller.isSpringing()) {
+            mSpringOverScroll = getSpringOverScroll(amount);
             invalidate();
             return;
         }
@@ -1128,8 +1095,8 @@ public abstract class PagedView<T extends View & PageIndicator> extends ViewGrou
     }
 
     protected void overScroll(int amount) {
-        mSpringOverScroll = amount;
         if (mScroller.isSpringing()) {
+            mSpringOverScroll = getSpringOverScroll(amount);
             invalidate();
             return;
         }
@@ -1231,6 +1198,8 @@ public abstract class PagedView<T extends View & PageIndicator> extends ViewGrou
             if (mIsBeingDragged) {
                 final int activePointerId = mActivePointerId;
                 final int pointerIndex = ev.findPointerIndex(activePointerId);
+                if (pointerIndex == -1) return true;
+
                 final float primaryDirection = mOrientationHandler.getPrimaryDirection(ev,
                     pointerIndex);
                 final VelocityTracker velocityTracker = mVelocityTracker;

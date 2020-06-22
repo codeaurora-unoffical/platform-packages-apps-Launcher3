@@ -29,6 +29,7 @@ import android.content.res.TypedArray;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.PointF;
 import android.graphics.Rect;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
@@ -53,7 +54,13 @@ import com.android.launcher3.graphics.PreloadIconDrawable;
 import com.android.launcher3.icons.DotRenderer;
 import com.android.launcher3.icons.IconCache.IconLoadRequest;
 import com.android.launcher3.icons.IconCache.ItemInfoUpdateReceiver;
-import com.android.launcher3.model.PackageItemInfo;
+import com.android.launcher3.model.data.AppInfo;
+import com.android.launcher3.model.data.ItemInfo;
+import com.android.launcher3.model.data.ItemInfoWithIcon;
+import com.android.launcher3.model.data.PackageItemInfo;
+import com.android.launcher3.model.data.PromiseAppInfo;
+import com.android.launcher3.model.data.WorkspaceItemInfo;
+import com.android.launcher3.util.SafeCloseable;
 import com.android.launcher3.views.ActivityContext;
 import com.android.launcher3.views.IconLabelDotView;
 
@@ -65,7 +72,7 @@ import java.text.NumberFormat;
  * too aggressive.
  */
 public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver, OnResumeCallback,
-        IconLabelDotView, DraggableView {
+        IconLabelDotView, DraggableView, Reorderable {
 
     private static final int DISPLAY_WORKSPACE = 0;
     private static final int DISPLAY_ALL_APPS = 1;
@@ -73,6 +80,10 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver, 
 
     private static final int[] STATE_PRESSED = new int[] {android.R.attr.state_pressed};
 
+    private final PointF mTranslationForReorderBounce = new PointF(0, 0);
+    private final PointF mTranslationForReorderPreview = new PointF(0, 0);
+
+    private float mScaleForReorderBounce = 1f;
 
     private static final Property<BubbleTextView, Float> DOT_SCALE_PROPERTY
             = new Property<BubbleTextView, Float>(Float.TYPE, "dotScale") {
@@ -667,23 +678,79 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver, 
         return mIconSize;
     }
 
+    private void updateTranslation() {
+        super.setTranslationX(mTranslationForReorderBounce.x + mTranslationForReorderPreview.x);
+        super.setTranslationY(mTranslationForReorderBounce.y + mTranslationForReorderPreview.y);
+    }
+
+    public void setReorderBounceOffset(float x, float y) {
+        mTranslationForReorderBounce.set(x, y);
+        updateTranslation();
+    }
+
+    public void getReorderBounceOffset(PointF offset) {
+        offset.set(mTranslationForReorderBounce);
+    }
+
+    @Override
+    public void setReorderPreviewOffset(float x, float y) {
+        mTranslationForReorderPreview.set(x, y);
+        updateTranslation();
+    }
+
+    @Override
+    public void getReorderPreviewOffset(PointF offset) {
+        offset.set(mTranslationForReorderPreview);
+    }
+
+    public void setReorderBounceScale(float scale) {
+        mScaleForReorderBounce = scale;
+        super.setScaleX(scale);
+        super.setScaleY(scale);
+    }
+
+    public float getReorderBounceScale() {
+        return mScaleForReorderBounce;
+    }
+
+    public View getView() {
+        return this;
+    }
+
     @Override
     public int getViewType() {
         return DRAGGABLE_ICON;
     }
 
     @Override
-    public void getVisualDragBounds(Rect bounds) {
+    public void getWorkspaceVisualDragBounds(Rect bounds) {
         DeviceProfile grid = mActivity.getDeviceProfile();
         BubbleTextView.getIconBounds(this, bounds, grid.iconSizePx);
     }
 
+    private int getIconSizeForDisplay(int display) {
+        DeviceProfile grid = mActivity.getDeviceProfile();
+        switch (display) {
+            case DISPLAY_ALL_APPS:
+                return grid.allAppsIconSizePx;
+            case DISPLAY_WORKSPACE:
+            case DISPLAY_FOLDER:
+            default:
+                return grid.iconSizePx;
+        }
+    }
+
+    public void getSourceVisualDragBounds(Rect bounds) {
+        BubbleTextView.getIconBounds(this, bounds, getIconSizeForDisplay(mDisplay));
+    }
+
     @Override
-    public void prepareDrawDragView() {
+    public SafeCloseable prepareDrawDragView() {
         if (getIcon() instanceof FastBitmapDrawable) {
             FastBitmapDrawable icon = (FastBitmapDrawable) getIcon();
             icon.setScale(1f);
         }
         setForceHideDot(true);
+        return () -> { };
     }
 }

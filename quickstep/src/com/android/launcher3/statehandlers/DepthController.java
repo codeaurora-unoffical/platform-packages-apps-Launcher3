@@ -17,6 +17,8 @@
 package com.android.launcher3.statehandlers;
 
 import static com.android.launcher3.anim.Interpolators.LINEAR;
+import static com.android.launcher3.states.StateAnimationConfig.ANIM_DEPTH;
+import static com.android.launcher3.states.StateAnimationConfig.SKIP_DEPTH_CONTROLLER;
 
 import android.os.IBinder;
 import android.util.FloatProperty;
@@ -25,10 +27,10 @@ import android.view.ViewTreeObserver;
 
 import com.android.launcher3.Launcher;
 import com.android.launcher3.LauncherState;
-import com.android.launcher3.LauncherStateManager;
 import com.android.launcher3.R;
 import com.android.launcher3.Utilities;
 import com.android.launcher3.anim.PendingAnimation;
+import com.android.launcher3.statemanager.StateManager.StateHandler;
 import com.android.launcher3.states.StateAnimationConfig;
 import com.android.systemui.shared.system.RemoteAnimationTargetCompat;
 import com.android.systemui.shared.system.SurfaceControlCompat;
@@ -38,7 +40,7 @@ import com.android.systemui.shared.system.WallpaperManagerCompat;
 /**
  * Controls blur and wallpaper zoom, for the Launcher surface only.
  */
-public class DepthController implements LauncherStateManager.StateHandler {
+public class DepthController implements StateHandler<LauncherState> {
 
     public static final FloatProperty<DepthController> DEPTH =
             new FloatProperty<DepthController>("depth") {
@@ -101,11 +103,30 @@ public class DepthController implements LauncherStateManager.StateHandler {
      */
     private float mDepth;
 
+    private View.OnAttachStateChangeListener mOnAttachListener;
+
     public DepthController(Launcher l) {
         mLauncher = l;
     }
 
     private void ensureDependencies() {
+        if (mLauncher.getRootView() != null && mOnAttachListener == null) {
+            mOnAttachListener = new View.OnAttachStateChangeListener() {
+                @Override
+                public void onViewAttachedToWindow(View view) {
+                    // To handle the case where window token is invalid during last setDepth call.
+                    IBinder windowToken = mLauncher.getRootView().getWindowToken();
+                    if (windowToken != null) {
+                        mWallpaperManager.setWallpaperZoomOut(windowToken, mDepth);
+                    }
+                }
+
+                @Override
+                public void onViewDetachedFromWindow(View view) {
+                }
+            };
+            mLauncher.getRootView().addOnAttachStateChangeListener(mOnAttachListener);
+        }
         if (mWallpaperManager != null) {
             return;
         }
@@ -163,28 +184,47 @@ public class DepthController implements LauncherStateManager.StateHandler {
     @Override
     public void setStateWithAnimation(LauncherState toState, StateAnimationConfig config,
             PendingAnimation animation) {
-        if (mSurface == null || config.onlyPlayAtomicComponent()) {
+        if (mSurface == null
+                || config.onlyPlayAtomicComponent()
+                || config.hasAnimationFlag(SKIP_DEPTH_CONTROLLER)) {
             return;
         }
 
         float toDepth = toState.getDepth(mLauncher);
         if (Float.compare(mDepth, toDepth) != 0) {
-            animation.setFloat(this, DEPTH, toDepth, LINEAR);
+            animation.setFloat(this, DEPTH, toDepth, config.getInterpolator(ANIM_DEPTH, LINEAR));
         }
     }
 
     private void setDepth(float depth) {
-        mDepth = depth;
+        depth = Utilities.boundToRange(depth, 0, 1);
+        // Round out the depth to dedupe frequent, non-perceptable updates
+        int depthI = (int) (depth * 256);
+        float depthF = depthI / 256f;
+        if (Float.compare(mDepth, depthF) == 0) {
+            return;
+        }
+
         if (mSurface == null || !mSurface.isValid()) {
             return;
         }
+        mDepth = depthF;
         ensureDependencies();
         IBinder windowToken = mLauncher.getRootView().getWindowToken();
         if (windowToken != null) {
             mWallpaperManager.setWallpaperZoomOut(windowToken, mDepth);
         }
+        final int blur;
+        if (mLauncher.isInState(LauncherState.ALL_APPS) && mDepth == 1) {
+            // All apps has a solid background. We don't need to draw blurs after it's fully
+            // visible. This will take us out of GPU composition, saving battery and increasing
+            // performance.
+            blur = 0;
+        } else {
+            blur = (int) (mDepth * mMaxBlurRadius);
+        }
         new TransactionCompat()
-                .setBackgroundBlurRadius(mSurface, (int) (mDepth * mMaxBlurRadius))
+                .setBackgroundBlurRadius(mSurface, blur)
                 .apply();
     }
 }

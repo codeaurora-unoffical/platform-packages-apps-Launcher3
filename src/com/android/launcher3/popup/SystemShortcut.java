@@ -1,5 +1,7 @@
 package com.android.launcher3.popup;
 
+import static com.android.launcher3.logging.StatsLogManager.LauncherEvent.LAUNCHER_SYSTEM_SHORTCUT_APP_INFO_TAP;
+import static com.android.launcher3.logging.StatsLogManager.LauncherEvent.LAUNCHER_SYSTEM_SHORTCUT_WIDGETS_TAP;
 
 import android.app.ActivityOptions;
 import android.content.Context;
@@ -14,11 +16,11 @@ import androidx.annotation.Nullable;
 
 import com.android.launcher3.AbstractFloatingView;
 import com.android.launcher3.BaseDraggingActivity;
-import com.android.launcher3.ItemInfo;
 import com.android.launcher3.Launcher;
 import com.android.launcher3.R;
-import com.android.launcher3.WorkspaceItemInfo;
 import com.android.launcher3.model.WidgetItem;
+import com.android.launcher3.model.data.ItemInfo;
+import com.android.launcher3.model.data.WorkspaceItemInfo;
 import com.android.launcher3.userevent.nano.LauncherLogProto.Action;
 import com.android.launcher3.userevent.nano.LauncherLogProto.ControlType;
 import com.android.launcher3.util.InstantAppResolver;
@@ -103,7 +105,6 @@ public abstract class SystemShortcut<T extends BaseDraggingActivity> extends Ite
     };
 
     public static class Widgets extends SystemShortcut<Launcher> {
-
         public Widgets(Launcher target, ItemInfo itemInfo) {
             super(R.drawable.ic_widget, R.string.widget_button_text, target, itemInfo);
         }
@@ -117,6 +118,9 @@ public abstract class SystemShortcut<T extends BaseDraggingActivity> extends Ite
             widgetsBottomSheet.populateAndShow(mItemInfo);
             mTarget.getUserEventDispatcher().logActionOnControl(Action.Touch.TAP,
                     ControlType.WIDGETS_BUTTON, view);
+            // TODO(thiruram): Fix missing container info when item is inside folder.
+            mTarget.getStatsLogManager().log(LAUNCHER_SYSTEM_SHORTCUT_WIDGETS_TAP,
+                    mItemInfo.buildProto());
         }
     }
 
@@ -137,6 +141,9 @@ public abstract class SystemShortcut<T extends BaseDraggingActivity> extends Ite
                     mItemInfo, sourceBounds, ActivityOptions.makeBasic().toBundle());
             mTarget.getUserEventDispatcher().logActionOnControl(Action.Touch.TAP,
                     ControlType.APPINFO_TARGET, view);
+            // TODO(thiruram): Fix missing container info when item is inside folder.
+            mTarget.getStatsLogManager().log(LAUNCHER_SYSTEM_SHORTCUT_APP_INFO_TAP,
+                    mItemInfo.buildProto());
         }
     }
 
@@ -145,8 +152,9 @@ public abstract class SystemShortcut<T extends BaseDraggingActivity> extends Ite
                 && ((WorkspaceItemInfo) itemInfo).hasStatusFlag(
                         WorkspaceItemInfo.FLAG_SUPPORTS_WEB_UI);
         boolean isInstantApp = false;
-        if (itemInfo instanceof com.android.launcher3.AppInfo) {
-            com.android.launcher3.AppInfo appInfo = (com.android.launcher3.AppInfo) itemInfo;
+        if (itemInfo instanceof com.android.launcher3.model.data.AppInfo) {
+            com.android.launcher3.model.data.AppInfo
+                    appInfo = (com.android.launcher3.model.data.AppInfo) itemInfo;
             isInstantApp = InstantAppResolver.newInstance(activity).isInstantApp(appInfo);
         }
         boolean enabled = supportsWebUI || isInstantApp;

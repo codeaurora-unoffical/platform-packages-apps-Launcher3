@@ -181,6 +181,11 @@ public abstract class BaseDragLayer<T extends Context & ActivityContext>
     }
 
     private TouchController findControllerToHandleTouch(MotionEvent ev) {
+        if (TestProtocol.sDebugTracing) {
+            Log.d(TestProtocol.PAUSE_NOT_DETECTED, "findControllerToHandleTouch ev=" + ev
+                    + ", isEventInLauncher=" + isEventInLauncher(ev)
+                    + ", topOpenView=" + AbstractFloatingView.getTopOpenView(mActivity));
+        }
         if (isEventInLauncher(ev)) {
             AbstractFloatingView topView = AbstractFloatingView.getTopOpenView(mActivity);
             if (topView != null && topView.onControllerInterceptTouchEvent(ev)) {
@@ -275,9 +280,6 @@ public abstract class BaseDragLayer<T extends Context & ActivityContext>
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
-        if (Utilities.IS_RUNNING_IN_TEST_HARNESS) {
-            Log.d(TestProtocol.NO_SCROLL_END_WIDGETS, "BaseDragLayer: " + ev);
-        }
         switch (ev.getAction()) {
             case ACTION_DOWN: {
                 mTouchDispatchState |= TOUCH_DISPATCHING_VIEW;

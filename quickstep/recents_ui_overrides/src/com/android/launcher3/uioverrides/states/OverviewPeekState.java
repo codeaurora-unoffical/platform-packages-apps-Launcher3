@@ -15,42 +15,17 @@
  */
 package com.android.launcher3.uioverrides.states;
 
-import static com.android.launcher3.anim.Interpolators.FAST_OUT_SLOW_IN;
-import static com.android.launcher3.anim.Interpolators.INSTANT;
-import static com.android.launcher3.anim.Interpolators.OVERSHOOT_1_7;
-import static com.android.launcher3.states.StateAnimationConfig.ANIM_OVERVIEW_FADE;
-import static com.android.launcher3.states.StateAnimationConfig.ANIM_OVERVIEW_SCRIM_FADE;
-import static com.android.launcher3.states.StateAnimationConfig.ANIM_OVERVIEW_TRANSLATE_X;
-
 import com.android.launcher3.Launcher;
-import com.android.launcher3.LauncherState;
-import com.android.launcher3.R;
-import com.android.launcher3.Utilities;
-import com.android.launcher3.states.StateAnimationConfig;
 
 public class OverviewPeekState extends OverviewState {
+    private static final float OVERVIEW_OFFSET = 0.7f;
+
     public OverviewPeekState(int id) {
         super(id);
     }
 
     @Override
-    public ScaleAndTranslation getOverviewScaleAndTranslation(Launcher launcher) {
-        ScaleAndTranslation result = super.getOverviewScaleAndTranslation(launcher);
-        result.translationX = NORMAL.getOverviewScaleAndTranslation(launcher).translationX
-                - launcher.getResources().getDimension(R.dimen.overview_peek_distance);
-        if (Utilities.isRtl(launcher.getResources())) {
-            result.translationX = -result.translationX;
-        }
-        return result;
-    }
-
-    @Override
-    public void prepareForAtomicAnimation(Launcher launcher, LauncherState fromState,
-            StateAnimationConfig config) {
-        if (this == OVERVIEW_PEEK && fromState == NORMAL) {
-            config.setInterpolator(ANIM_OVERVIEW_FADE, INSTANT);
-            config.setInterpolator(ANIM_OVERVIEW_TRANSLATE_X, OVERSHOOT_1_7);
-            config.setInterpolator(ANIM_OVERVIEW_SCRIM_FADE, FAST_OUT_SLOW_IN);
-        }
+    public float[] getOverviewScaleAndOffset(Launcher launcher) {
+        return new float[] {NO_SCALE, OVERVIEW_OFFSET};
     }
 }

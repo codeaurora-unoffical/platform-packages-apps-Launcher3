@@ -24,6 +24,7 @@ import static com.android.launcher3.touch.SingleAxisSwipeDetector.DIRECTION_POSI
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.view.MotionEvent;
+import android.view.View;
 
 import com.android.launcher3.AbstractFloatingView;
 import com.android.launcher3.BaseDraggingActivity;
@@ -57,6 +58,7 @@ public abstract class TaskViewTouchController<T extends BaseDraggingActivity>
     private final SingleAxisSwipeDetector mDetector;
     private final RecentsView mRecentsView;
     private final int[] mTempCords = new int[2];
+    private final boolean mIsRtl;
 
     private PendingAnimation mPendingAnimation;
     private AnimatorPlaybackController mCurrentAnimation;
@@ -74,6 +76,7 @@ public abstract class TaskViewTouchController<T extends BaseDraggingActivity>
     public TaskViewTouchController(T activity) {
         mActivity = activity;
         mRecentsView = activity.getOverviewPanel();
+        mIsRtl = Utilities.isRtl(activity.getResources());
         SingleAxisSwipeDetector.Direction dir =
             mRecentsView.getPagedOrientationHandler().getOppositeSwipeDirection();
         mDetector = new SingleAxisSwipeDetector(activity, this, dir);
@@ -94,6 +97,9 @@ public abstract class TaskViewTouchController<T extends BaseDraggingActivity>
     }
 
     protected abstract boolean isRecentsInteractive();
+
+    /** Is recents view showing a single task in a modal way. */
+    protected abstract boolean isRecentsModal();
 
     protected void onUserControlledAnimationCreated(AnimatorPlaybackController animController) {
     }
@@ -133,7 +139,7 @@ public abstract class TaskViewTouchController<T extends BaseDraggingActivity>
                     if (mRecentsView.isTaskViewVisible(view) && mActivity.getDragLayer()
                             .isEventOverView(view, ev)) {
                         // Disable swiping up and down if the task overlay is modal.
-                        if (view.isTaskOverlayModal()) {
+                        if (isRecentsModal()) {
                             mTaskBeingDragged = null;
                             break;
                         }
@@ -197,8 +203,8 @@ public abstract class TaskViewTouchController<T extends BaseDraggingActivity>
         mCurrentAnimationIsGoingUp = goingUp;
         BaseDragLayer dl = mActivity.getDragLayer();
         final int secondaryLayerDimension = orientationHandler.getSecondaryDimension(dl);
-        long maxDuration = (long) (2 * secondaryLayerDimension);
-        int verticalFactor = -orientationHandler.getTaskDismissDirectionFactor();
+        long maxDuration = 2 * secondaryLayerDimension;
+        int verticalFactor = orientationHandler.getTaskDragDisplacementFactor(mIsRtl);
         int secondaryTaskDimension = orientationHandler.getSecondaryDimension(mTaskBeingDragged);
         if (goingUp) {
             mPendingAnimation = mRecentsView.createTaskDismissAnimation(mTaskBeingDragged,
@@ -209,9 +215,11 @@ public abstract class TaskViewTouchController<T extends BaseDraggingActivity>
             mPendingAnimation = mRecentsView.createTaskLaunchAnimation(
                     mTaskBeingDragged, maxDuration, Interpolators.ZOOM_IN);
 
-            mTempCords[1] = mTaskBeingDragged.getHeight();
-            dl.getDescendantCoordRelativeToSelf(mTaskBeingDragged, mTempCords);
-            mEndDisplacement = dl.getHeight() - mTempCords[1];
+            // Since the thumbnail is what is filling the screen, based the end displacement on it.
+            View thumbnailView = mTaskBeingDragged.getThumbnail();
+            mTempCords[1] = orientationHandler.getSecondaryDimension(thumbnailView);
+            dl.getDescendantCoordRelativeToSelf(thumbnailView, mTempCords);
+            mEndDisplacement = secondaryLayerDimension - mTempCords[1];
         }
         mEndDisplacement *= verticalFactor;
 
@@ -230,7 +238,7 @@ public abstract class TaskViewTouchController<T extends BaseDraggingActivity>
     public void onDragStart(boolean start, float startDisplacement) {
         PagedOrientationHandler orientationHandler = mRecentsView.getPagedOrientationHandler();
         if (mCurrentAnimation == null) {
-            reInitAnimationController(orientationHandler.isGoingUp(startDisplacement));
+            reInitAnimationController(orientationHandler.isGoingUp(startDisplacement, mIsRtl));
             mDisplacementShift = 0;
         } else {
             mDisplacementShift = mCurrentAnimation.getProgressFraction() / mProgressMultiplier;
@@ -244,7 +252,7 @@ public abstract class TaskViewTouchController<T extends BaseDraggingActivity>
         PagedOrientationHandler orientationHandler = mRecentsView.getPagedOrientationHandler();
         float totalDisplacement = displacement + mDisplacementShift;
         boolean isGoingUp = totalDisplacement == 0 ? mCurrentAnimationIsGoingUp :
-                orientationHandler.isGoingUp(totalDisplacement);
+                orientationHandler.isGoingUp(totalDisplacement, mIsRtl);
         if (isGoingUp != mCurrentAnimationIsGoingUp) {
             reInitAnimationController(isGoingUp);
             mFlingBlockCheck.blockFling();
@@ -276,7 +284,7 @@ public abstract class TaskViewTouchController<T extends BaseDraggingActivity>
         float interpolatedProgress = mCurrentAnimation.getInterpolatedProgress();
         if (fling) {
             logAction = Touch.FLING;
-            boolean goingUp = orientationHandler.isGoingUp(velocity);
+            boolean goingUp = orientationHandler.isGoingUp(velocity, mIsRtl);
             goingToEnd = goingUp == mCurrentAnimationIsGoingUp;
         } else {
             logAction = Touch.SWIPE;

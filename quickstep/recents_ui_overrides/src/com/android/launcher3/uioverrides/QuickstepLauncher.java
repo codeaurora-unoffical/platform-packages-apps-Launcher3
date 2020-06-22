@@ -15,28 +15,44 @@
  */
 package com.android.launcher3.uioverrides;
 
+import static android.view.accessibility.AccessibilityEvent.TYPE_VIEW_FOCUSED;
+
 import static com.android.launcher3.LauncherState.NORMAL;
 import static com.android.launcher3.LauncherState.OVERVIEW;
+import static com.android.launcher3.LauncherState.OVERVIEW_MODAL_TASK;
+import static com.android.launcher3.compat.AccessibilityManagerCompat.sendCustomAccessibilityEvent;
+import static com.android.launcher3.testing.TestProtocol.HINT_STATE_ORDINAL;
+import static com.android.launcher3.testing.TestProtocol.OVERVIEW_STATE_ORDINAL;
+import static com.android.launcher3.testing.TestProtocol.QUICK_SWITCH_STATE_ORDINAL;
+import static com.android.launcher3.util.Executors.MAIN_EXECUTOR;
 import static com.android.quickstep.SysUINavigationMode.Mode.NO_BUTTON;
 
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.View;
 
 import androidx.annotation.Nullable;
 
 import com.android.launcher3.BaseQuickstepLauncher;
 import com.android.launcher3.DeviceProfile;
-import com.android.launcher3.ItemInfo;
 import com.android.launcher3.Launcher;
 import com.android.launcher3.LauncherState;
-import com.android.launcher3.WorkspaceItemInfo;
+import com.android.launcher3.Workspace;
+import com.android.launcher3.allapps.DiscoveryBounce;
 import com.android.launcher3.anim.AnimatorPlaybackController;
 import com.android.launcher3.config.FeatureFlags;
 import com.android.launcher3.folder.Folder;
+import com.android.launcher3.hybridhotseat.HotseatEduController;
 import com.android.launcher3.hybridhotseat.HotseatPredictionController;
+import com.android.launcher3.model.data.AppInfo;
+import com.android.launcher3.model.data.ItemInfo;
+import com.android.launcher3.model.data.WorkspaceItemInfo;
 import com.android.launcher3.popup.SystemShortcut;
+import com.android.launcher3.statemanager.StateManager.AtomicAnimationFactory;
+import com.android.launcher3.testing.TestProtocol;
+import com.android.launcher3.uioverrides.states.QuickstepAtomicAnimationFactory;
 import com.android.launcher3.uioverrides.touchcontrollers.FlingAndHoldTouchController;
 import com.android.launcher3.uioverrides.touchcontrollers.LandscapeEdgeSwipeController;
 import com.android.launcher3.uioverrides.touchcontrollers.NavBarToHomeTouchController;
@@ -48,16 +64,20 @@ import com.android.launcher3.uioverrides.touchcontrollers.QuickSwitchTouchContro
 import com.android.launcher3.uioverrides.touchcontrollers.StatusBarTouchController;
 import com.android.launcher3.uioverrides.touchcontrollers.TaskViewTouchController;
 import com.android.launcher3.uioverrides.touchcontrollers.TransposedQuickSwitchTouchController;
+import com.android.launcher3.util.IntArray;
 import com.android.launcher3.util.TouchController;
 import com.android.launcher3.util.UiThreadHelper;
 import com.android.launcher3.util.UiThreadHelper.AsyncCommand;
-import com.android.quickstep.RecentsModel;
 import com.android.quickstep.SysUINavigationMode;
 import com.android.quickstep.SysUINavigationMode.Mode;
 import com.android.quickstep.SystemUiProxy;
 import com.android.quickstep.views.RecentsView;
+import com.android.quickstep.views.TaskView;
 
+import java.io.FileDescriptor;
+import java.io.PrintWriter;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.stream.Stream;
 
 public class QuickstepLauncher extends BaseQuickstepLauncher {
@@ -75,13 +95,28 @@ public class QuickstepLauncher extends BaseQuickstepLauncher {
         super.onCreate(savedInstanceState);
         if (FeatureFlags.ENABLE_HYBRID_HOTSEAT.get()) {
             mHotseatPredictionController = new HotseatPredictionController(this);
+            mHotseatPredictionController.createPredictor();
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (HotseatEduController.HOTSEAT_EDU_ACTION.equals(intent.getAction())
+                && mHotseatPredictionController != null) {
+            boolean alreadyOnHome = hasWindowFocus() && ((intent.getFlags()
+                    & Intent.FLAG_ACTIVITY_BROUGHT_TO_FRONT)
+                    != Intent.FLAG_ACTIVITY_BROUGHT_TO_FRONT);
+            getStateManager().goToState(NORMAL, alreadyOnHome, () -> {
+                mHotseatPredictionController.showEdu();
+            });
         }
     }
 
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
-        onStateOrResumeChanged();
+        onStateOrResumeChanging(false /* inTransition */);
     }
 
     @Override
@@ -96,11 +131,9 @@ public class QuickstepLauncher extends BaseQuickstepLauncher {
     @Override
     protected void onActivityFlagsChanged(int changeBits) {
         super.onActivityFlagsChanged(changeBits);
-
         if ((changeBits & (ACTIVITY_STATE_DEFERRED_RESUMED | ACTIVITY_STATE_STARTED
-                | ACTIVITY_STATE_USER_ACTIVE | ACTIVITY_STATE_TRANSITION_ACTIVE)) != 0
-                && (getActivityFlags() & ACTIVITY_STATE_TRANSITION_ACTIVE) == 0) {
-            onStateOrResumeChanged();
+                | ACTIVITY_STATE_USER_ACTIVE | ACTIVITY_STATE_TRANSITION_ACTIVE)) != 0) {
+            onStateOrResumeChanging((getActivityFlags() & ACTIVITY_STATE_TRANSITION_ACTIVE) == 0);
         }
 
         if (mHotseatPredictionController != null && ((changeBits & ACTIVITY_STATE_STARTED) != 0
@@ -145,23 +178,26 @@ public class QuickstepLauncher extends BaseQuickstepLauncher {
     /**
      * Recents logic that triggers when launcher state changes or launcher activity stops/resumes.
      */
-    private void onStateOrResumeChanged() {
+    private void onStateOrResumeChanging(boolean inTransition) {
         LauncherState state = getStateManager().getState();
         DeviceProfile profile = getDeviceProfile();
-        boolean visible = (state == NORMAL || state == OVERVIEW) && isUserActive()
-                && !profile.isVerticalBarLayout();
+        boolean willUserBeActive = (getActivityFlags() & ACTIVITY_STATE_USER_WILL_BE_ACTIVE) != 0;
+        boolean visible = (state == NORMAL || state == OVERVIEW)
+                && (willUserBeActive || isUserActive())
+                && !profile.isVerticalBarLayout()
+                && profile.isPhone && !profile.isLandscape;
         UiThreadHelper.runAsyncCommand(this, SET_SHELF_HEIGHT, visible ? 1 : 0,
                 profile.hotseatBarSizePx);
-        if (state == NORMAL) {
+        if (state == NORMAL && !inTransition) {
             ((RecentsView) getOverviewPanel()).setSwipeDownShouldLaunchApp(false);
         }
     }
 
     @Override
-    public void finishBindingItems(int pageBoundFirst) {
-        super.finishBindingItems(pageBoundFirst);
+    public void bindPredictedItems(List<AppInfo> appInfos, IntArray ranks) {
+        super.bindPredictedItems(appInfos, ranks);
         if (mHotseatPredictionController != null) {
-            mHotseatPredictionController.createPredictor();
+            mHotseatPredictionController.showCachedItems(appInfos, ranks);
         }
     }
 
@@ -170,11 +206,60 @@ public class QuickstepLauncher extends BaseQuickstepLauncher {
         super.onDestroy();
         if (mHotseatPredictionController != null) {
             mHotseatPredictionController.destroy();
+            mHotseatPredictionController = null;
+        }
+    }
+
+    @Override
+    public void onStateSetEnd(LauncherState state) {
+        super.onStateSetEnd(state);
+
+        switch (state.ordinal) {
+            case HINT_STATE_ORDINAL: {
+                Workspace workspace = getWorkspace();
+                boolean willMoveScreens = workspace.getNextPage() != Workspace.DEFAULT_PAGE;
+                getStateManager().goToState(NORMAL, true,
+                        willMoveScreens ? null : getScrimView()::startDragHandleEducationAnim);
+                if (willMoveScreens) {
+                    workspace.post(workspace::moveToDefaultScreen);
+                }
+                break;
+            }
+            case OVERVIEW_STATE_ORDINAL: {
+                RecentsView recentsView = getOverviewPanel();
+                DiscoveryBounce.showForOverviewIfNeeded(this,
+                        recentsView.getPagedOrientationHandler());
+                RecentsView rv = getOverviewPanel();
+                sendCustomAccessibilityEvent(
+                        rv.getPageAt(rv.getCurrentPage()), TYPE_VIEW_FOCUSED, null);
+                break;
+            }
+            case QUICK_SWITCH_STATE_ORDINAL: {
+                RecentsView rv = getOverviewPanel();
+                TaskView tasktolaunch = rv.getTaskViewAt(0);
+                if (tasktolaunch != null) {
+                    tasktolaunch.launchTask(false, success -> {
+                        if (!success) {
+                            getStateManager().goToState(OVERVIEW);
+                            tasktolaunch.notifyTaskLaunchFailed(TAG);
+                        } else {
+                            getStateManager().moveToRestState();
+                        }
+                    }, MAIN_EXECUTOR.getHandler());
+                } else {
+                    getStateManager().goToState(NORMAL);
+                }
+                break;
+            }
+
         }
     }
 
     @Override
     public TouchController[] createTouchControllers() {
+        if (TestProtocol.sDebugTracing) {
+            Log.d(TestProtocol.PAUSE_NOT_DETECTED, "createTouchControllers.1");
+        }
         Mode mode = SysUINavigationMode.getMode(this);
 
         ArrayList<TouchController> list = new ArrayList<>();
@@ -182,7 +267,13 @@ public class QuickstepLauncher extends BaseQuickstepLauncher {
         if (mode == NO_BUTTON) {
             list.add(new NoButtonQuickSwitchTouchController(this));
             list.add(new NavBarToHomeTouchController(this));
+            if (TestProtocol.sDebugTracing) {
+                Log.d(TestProtocol.PAUSE_NOT_DETECTED, "createTouchControllers.2");
+            }
             if (FeatureFlags.ENABLE_OVERVIEW_ACTIONS.get()) {
+                if (TestProtocol.sDebugTracing) {
+                    Log.d(TestProtocol.PAUSE_NOT_DETECTED, "createTouchControllers.3");
+                }
                 list.add(new NoButtonNavbarToOverviewTouchController(this));
             } else {
                 list.add(new FlingAndHoldTouchController(this));
@@ -211,6 +302,11 @@ public class QuickstepLauncher extends BaseQuickstepLauncher {
         return list.toArray(new TouchController[list.size()]);
     }
 
+    @Override
+    public AtomicAnimationFactory createAtomicAnimationFactory() {
+        return new QuickstepAtomicAnimationFactory(this);
+    }
+
     private static final class LauncherTaskViewController extends
             TaskViewTouchController<Launcher> {
 
@@ -220,12 +316,26 @@ public class QuickstepLauncher extends BaseQuickstepLauncher {
 
         @Override
         protected boolean isRecentsInteractive() {
-            return mActivity.isInState(OVERVIEW);
+            return mActivity.isInState(OVERVIEW) || mActivity.isInState(OVERVIEW_MODAL_TASK);
+        }
+
+        @Override
+        protected boolean isRecentsModal() {
+            return mActivity.isInState(OVERVIEW_MODAL_TASK);
         }
 
         @Override
         protected void onUserControlledAnimationCreated(AnimatorPlaybackController animController) {
             mActivity.getStateManager().setCurrentUserControlledAnimation(animController);
         }
+    }
+
+    @Override
+    public void dump(String prefix, FileDescriptor fd, PrintWriter writer, String[] args) {
+        super.dump(prefix, fd, writer, args);
+        RecentsView recentsView = getOverviewPanel();
+        writer.println("\nQuickstepLauncher:");
+        writer.println(prefix + "\tmOrientationState: " + (recentsView == null ? "recentsNull" :
+                recentsView.getPagedViewOrientedState()));
     }
 }

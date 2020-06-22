@@ -28,12 +28,14 @@ import android.view.InputEvent;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.UiThread;
 
 import com.android.launcher3.util.Preconditions;
 import com.android.systemui.shared.recents.model.ThumbnailData;
 import com.android.systemui.shared.system.InputConsumerController;
 import com.android.systemui.shared.system.RecentsAnimationControllerCompat;
+import com.android.systemui.shared.system.RemoteAnimationTargetCompat;
 
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -47,21 +49,22 @@ public class RecentsAnimationController {
 
     private final RecentsAnimationControllerCompat mController;
     private final Consumer<RecentsAnimationController> mOnFinishedListener;
-    private final boolean mShouldMinimizeSplitScreen;
+    private final boolean mAllowMinimizeSplitScreen;
 
     private InputConsumerController mInputConsumerController;
     private Supplier<InputConsumer> mInputProxySupplier;
     private InputConsumer mInputConsumer;
-    private boolean mWindowThresholdCrossed = false;
+    private boolean mUseLauncherSysBarFlags = false;
+    private boolean mSplitScreenMinimized = false;
     private boolean mTouchInProgress;
-    private boolean mFinishPending;
+    private boolean mDisableInputProxyPending;
 
     public RecentsAnimationController(RecentsAnimationControllerCompat controller,
-            boolean shouldMinimizeSplitScreen,
+            boolean allowMinimizeSplitScreen,
             Consumer<RecentsAnimationController> onFinishedListener) {
         mController = controller;
         mOnFinishedListener = onFinishedListener;
-        mShouldMinimizeSplitScreen = shouldMinimizeSplitScreen;
+        mAllowMinimizeSplitScreen = allowMinimizeSplitScreen;
     }
 
     /**
@@ -74,16 +77,31 @@ public class RecentsAnimationController {
 
     /**
      * Indicates that the gesture has crossed the window boundary threshold and system UI can be
-     * update the represent the window behind
+     * update the system bar flags accordingly.
      */
-    public void setWindowThresholdCrossed(boolean windowThresholdCrossed) {
-        if (mWindowThresholdCrossed != windowThresholdCrossed) {
-            mWindowThresholdCrossed = windowThresholdCrossed;
+    public void setUseLauncherSystemBarFlags(boolean useLauncherSysBarFlags) {
+        if (mUseLauncherSysBarFlags != useLauncherSysBarFlags) {
+            mUseLauncherSysBarFlags = useLauncherSysBarFlags;
             UI_HELPER_EXECUTOR.execute(() -> {
-                mController.setAnimationTargetsBehindSystemBars(!windowThresholdCrossed);
+                mController.setAnimationTargetsBehindSystemBars(!useLauncherSysBarFlags);
+            });
+        }
+    }
+
+    /**
+     * Indicates that the gesture has crossed the window boundary threshold and we should minimize
+     * if we are in splitscreen.
+     */
+    public void setSplitScreenMinimized(boolean splitScreenMinimized) {
+        if (!mAllowMinimizeSplitScreen) {
+            return;
+        }
+        if (mSplitScreenMinimized != splitScreenMinimized) {
+            mSplitScreenMinimized = splitScreenMinimized;
+            UI_HELPER_EXECUTOR.execute(() -> {
                 SystemUiProxy p = SystemUiProxy.INSTANCE.getNoCreate();
-                if (p != null && mShouldMinimizeSplitScreen) {
-                    p.setSplitScreenMinimized(windowThresholdCrossed);
+                if (p != null) {
+                    p.setSplitScreenMinimized(splitScreenMinimized);
                 }
             });
         }
@@ -107,14 +125,23 @@ public class RecentsAnimationController {
         UI_HELPER_EXECUTOR.execute(() -> mController.cleanupScreenshot());
     }
 
+    /**
+     * Remove task remote animation target from
+     * {@link RecentsAnimationCallbacks#onTaskAppeared(RemoteAnimationTargetCompat)}}.
+     */
+    @UiThread
+    public boolean removeTaskTarget(@NonNull RemoteAnimationTargetCompat target) {
+        return mController.removeTask(target.taskId);
+    }
+
     @UiThread
     public void finishAnimationToHome() {
-        finishAndClear(true /* toRecents */, null, false /* sendUserLeaveHint */);
+        finishAndDisableInputProxy(true /* toRecents */, null, false /* sendUserLeaveHint */);
     }
 
     @UiThread
     public void finishAnimationToApp() {
-        finishAndClear(false /* toRecents */, null, false /* sendUserLeaveHint */);
+        finishAndDisableInputProxy(false /* toRecents */, null, false /* sendUserLeaveHint */);
     }
 
     /** See {@link #finish(boolean, Runnable, boolean)} */
@@ -133,22 +160,16 @@ public class RecentsAnimationController {
     @UiThread
     public void finish(boolean toRecents, Runnable onFinishComplete, boolean sendUserLeaveHint) {
         Preconditions.assertUIThread();
-        if (!toRecents) {
-            finishAndClear(false, onFinishComplete, sendUserLeaveHint);
+        if (toRecents && mTouchInProgress) {
+            // Finish the controller as requested, but don't disable input proxy yet.
+            mDisableInputProxyPending = true;
+            finishController(toRecents, onFinishComplete, sendUserLeaveHint);
         } else {
-            if (mTouchInProgress) {
-                mFinishPending = true;
-                // Execute the callback
-                if (onFinishComplete != null) {
-                    onFinishComplete.run();
-                }
-            } else {
-                finishAndClear(true, onFinishComplete, sendUserLeaveHint);
-            }
+            finishAndDisableInputProxy(toRecents, onFinishComplete, sendUserLeaveHint);
         }
     }
 
-    private void finishAndClear(boolean toRecents, Runnable onFinishComplete,
+    private void finishAndDisableInputProxy(boolean toRecents, Runnable onFinishComplete,
             boolean sendUserLeaveHint) {
         disableInputProxy();
         finishController(toRecents, onFinishComplete, sendUserLeaveHint);
@@ -236,9 +257,9 @@ public class RecentsAnimationController {
         } else if (action == ACTION_CANCEL || action == ACTION_UP) {
             // Finish any pending actions
             mTouchInProgress = false;
-            if (mFinishPending) {
-                mFinishPending = false;
-                finishAndClear(true /* toRecents */, null, false /* sendUserLeaveHint */);
+            if (mDisableInputProxyPending) {
+                mDisableInputProxyPending = false;
+                disableInputProxy();
             }
         }
         if (mInputConsumer != null) {

@@ -44,6 +44,7 @@ public class LogEventChecker {
 
     private static final String START_PREFIX = "START_READER ";
     private static final String FINISH_PREFIX = "FINISH_READER ";
+    private static final String SKIP_EVENTS_TAG = "b/153670015";
 
     private volatile CountDownLatch mFinished;
 
@@ -68,54 +69,76 @@ public class LogEventChecker {
                 mFinished.await();
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
+            } finally {
+                mFinished = null;
             }
-            mFinished = null;
         }
         mEvents.clear();
+        Log.d(SKIP_EVENTS_TAG, "Cleared events");
         mExpectedEvents.clear();
         mEventsCounter.drainPermits();
         final String id = UUID.randomUUID().toString();
         mStartCommand = START_PREFIX + id;
         mFinishCommand = FINISH_PREFIX + id;
+        Log.d(SKIP_EVENTS_TAG, "Expected finish command: " + mFinishCommand);
         Log.d(TestProtocol.TAPL_EVENTS_TAG, mStartCommand);
     }
 
     private void onRun() {
+        while (true) readEvents();
+    }
+
+    private void readEvents() {
         try {
             // Note that we use Runtime.exec to start the log reading process instead of running
             // it via UIAutomation, so that we can directly access the "Process" object and
             // ensure that the instrumentation is not stuck forever.
             final String cmd = "logcat -s " + TestProtocol.TAPL_EVENTS_TAG;
 
+            final Process logcatProcess = Runtime.getRuntime().exec(cmd);
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(
-                    Runtime.getRuntime().exec(cmd).getInputStream()))) {
-                for (;;) {
+                    logcatProcess.getInputStream()))) {
+                while (true) {
                     // Skip everything before the next start command.
-                    for (;;) {
+                    for (; ; ) {
                         final String event = reader.readLine();
-                        if (event.contains(TestProtocol.TAPL_EVENTS_TAG)
-                                && event.contains(mStartCommand)) {
+                        if (event == null) {
+                            Log.d(SKIP_EVENTS_TAG, "Read a null line while waiting for start");
+                            return;
+                        }
+                        if (event.contains(mStartCommand)) {
+                            Log.d(SKIP_EVENTS_TAG, "Read start: " + event);
                             break;
                         }
                     }
 
                     // Store all actual events until the finish command.
-                    for (;;) {
+                    for (; ; ) {
                         final String event = reader.readLine();
-                        if (event.contains(TestProtocol.TAPL_EVENTS_TAG)) {
-                            if (event.contains(mFinishCommand)) {
-                                mFinished.countDown();
-                                break;
+                        if (event == null) {
+                            Log.d(SKIP_EVENTS_TAG, "Read a null line after waiting for start");
+                            mEventsCounter.drainPermits();
+                            mEvents.clear();
+                            return;
+                        }
+                        if (event.contains(mFinishCommand)) {
+                            mFinished.countDown();
+                            Log.d(SKIP_EVENTS_TAG, "Read finish: " + event);
+                            break;
+                        } else {
+                            final Matcher matcher = EVENT_LOG_ENTRY.matcher(event);
+                            if (matcher.find()) {
+                                mEvents.add(matcher.group("sequence"), matcher.group("event"));
+                                Log.d(SKIP_EVENTS_TAG, "Read event: " + event);
+                                mEventsCounter.release();
                             } else {
-                                final Matcher matcher = EVENT_LOG_ENTRY.matcher(event);
-                                if (matcher.find()) {
-                                    mEvents.add(matcher.group("sequence"), matcher.group("event"));
-                                    mEventsCounter.release();
-                                }
+                                Log.d(SKIP_EVENTS_TAG, "Read something unexpected: " + event);
                             }
                         }
                     }
                 }
+            } finally {
+                logcatProcess.destroyForcibly();
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
@@ -145,7 +168,7 @@ public class LogEventChecker {
         Log.d(TestProtocol.TAPL_EVENTS_TAG, mFinishCommand);
     }
 
-    String verify(long waitForExpectedCountMs) {
+    String verify(long waitForExpectedCountMs, boolean successfulGesture) {
         finishSync(waitForExpectedCountMs);
 
         final StringBuilder sb = new StringBuilder();
@@ -154,8 +177,10 @@ public class LogEventChecker {
             String sequence = expectedEvents.getKey();
 
             List<String> actual = new ArrayList<>(mEvents.getNonNull(sequence));
+            Log.d(SKIP_EVENTS_TAG, "Verifying events");
             final int mismatchPosition = getMismatchPosition(expectedEvents.getValue(), actual);
-            hasMismatches = hasMismatches || mismatchPosition != -1;
+            hasMismatches = hasMismatches
+                    || mismatchPosition != -1 && !ignoreMistatch(successfulGesture, sequence);
             formatSequenceWithMismatch(
                     sb,
                     sequence,
@@ -166,7 +191,8 @@ public class LogEventChecker {
         // Check for unexpected event sequences in the actual data.
         for (String actualNamedSequence : mEvents.keySet()) {
             if (!mExpectedEvents.containsKey(actualNamedSequence)) {
-                hasMismatches = true;
+                hasMismatches = hasMismatches
+                        || !ignoreMistatch(successfulGesture, actualNamedSequence);
                 formatSequenceWithMismatch(
                         sb,
                         actualNamedSequence,
@@ -177,6 +203,13 @@ public class LogEventChecker {
         }
 
         return hasMismatches ? "mismatching events: " + sb.toString() : null;
+    }
+
+    // Workaround for b/154157191
+    private static boolean ignoreMistatch(boolean successfulGesture, String sequence) {
+        // b/156287114
+        return false;
+//        return TestProtocol.SEQUENCE_TIS.equals(sequence) && successfulGesture;
     }
 
     // If the list of actual events matches the list of expected events, returns -1, otherwise

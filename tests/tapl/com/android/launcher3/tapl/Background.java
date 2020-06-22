@@ -71,7 +71,6 @@ public class Background extends LauncherInstrumentation.VisibleContainer {
     }
 
     protected void goToOverviewUnchecked() {
-        final boolean launcherWasVisible = mLauncher.isLauncherVisible();
         switch (mLauncher.getNavigationModel()) {
             case ZERO_BUTTON: {
                 final int centerX = mLauncher.getDevice().getDisplayWidth() / 2;
@@ -87,6 +86,11 @@ public class Background extends LauncherInstrumentation.VisibleContainer {
                         zeroButtonToOverviewGestureStartsInLauncher()
                                 ? LauncherInstrumentation.GestureScope.INSIDE_TO_OUTSIDE
                                 : LauncherInstrumentation.GestureScope.OUTSIDE;
+
+                // b/156044202
+                mLauncher.log("Hierarchy before swiping up to overview:");
+                mLauncher.dumpViewHierarchy();
+
                 mLauncher.sendPointer(
                         downTime, downTime, MotionEvent.ACTION_DOWN, start, gestureScope);
                 mLauncher.executeAndWaitForEvent(
@@ -138,11 +142,6 @@ public class Background extends LauncherInstrumentation.VisibleContainer {
                 break;
         }
         expectSwitchToOverviewEvents();
-
-        if (!launcherWasVisible) {
-            mLauncher.expectEvent(
-                    TestProtocol.SEQUENCE_MAIN, LauncherInstrumentation.EVENT_START_ACTIVITY);
-        }
     }
 
     private void expectSwitchToOverviewEvents() {
@@ -192,11 +191,6 @@ public class Background extends LauncherInstrumentation.VisibleContainer {
                 }
                 final boolean isZeroButton = mLauncher.getNavigationModel()
                         == LauncherInstrumentation.NavigationModel.ZERO_BUTTON;
-                if (!launcherWasVisible) {
-                    mLauncher.expectEvent(
-                            TestProtocol.SEQUENCE_MAIN,
-                            LauncherInstrumentation.EVENT_START_ACTIVITY);
-                }
                 mLauncher.swipeToState(startX, startY, endX, endY, 20, expectedState,
                         launcherWasVisible && isZeroButton
                                 ? LauncherInstrumentation.GestureScope.INSIDE_TO_OUTSIDE
@@ -208,11 +202,6 @@ public class Background extends LauncherInstrumentation.VisibleContainer {
                 // Double press the recents button.
                 UiObject2 recentsButton = mLauncher.waitForSystemUiObject("recent_apps");
                 mLauncher.expectEvent(TestProtocol.SEQUENCE_MAIN, SQUARE_BUTTON_EVENT);
-                if (!launcherWasVisible) {
-                    mLauncher.expectEvent(
-                            TestProtocol.SEQUENCE_MAIN,
-                            LauncherInstrumentation.EVENT_START_ACTIVITY);
-                }
                 mLauncher.runToState(() -> recentsButton.click(), OVERVIEW_STATE_ORDINAL);
                 mLauncher.getOverview();
                 mLauncher.expectEvent(TestProtocol.SEQUENCE_MAIN, SQUARE_BUTTON_EVENT);
@@ -220,8 +209,6 @@ public class Background extends LauncherInstrumentation.VisibleContainer {
                 break;
         }
         mLauncher.expectEvent(TestProtocol.SEQUENCE_MAIN, TASK_START_EVENT);
-        mLauncher.expectEvent(
-                TestProtocol.SEQUENCE_MAIN, LauncherInstrumentation.EVENT_STOP_ACTIVITY);
     }
 
     protected String getSwipeHeightRequestName() {

@@ -20,6 +20,7 @@ import static com.android.launcher3.LauncherState.ALL_APPS_HEADER_EXTRA;
 import static com.android.launcher3.LauncherState.NORMAL;
 import static com.android.launcher3.LauncherState.OVERVIEW;
 import static com.android.launcher3.LauncherState.OVERVIEW_BUTTONS;
+import static com.android.launcher3.LauncherState.OVERVIEW_MODAL_TASK;
 import static com.android.launcher3.LauncherState.SPRING_LOADED;
 import static com.android.launcher3.QuickstepAppTransitionManagerImpl.ALL_APPS_PROGRESS_OFF_SCREEN;
 import static com.android.launcher3.allapps.AllAppsTransitionController.ALL_APPS_PROGRESS;
@@ -29,32 +30,25 @@ import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
 import android.annotation.TargetApi;
 import android.content.Context;
-import android.graphics.Canvas;
-import android.graphics.Rect;
 import android.os.Build;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
-import android.view.View;
 import android.widget.FrameLayout;
 
 import com.android.launcher3.BaseQuickstepLauncher;
-import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.Hotseat;
 import com.android.launcher3.LauncherState;
-import com.android.launcher3.LauncherStateManager.StateListener;
 import com.android.launcher3.anim.Interpolators;
 import com.android.launcher3.appprediction.PredictionUiStateManager;
 import com.android.launcher3.appprediction.PredictionUiStateManager.Client;
-import com.android.launcher3.config.FeatureFlags;
 import com.android.launcher3.statehandlers.DepthController;
-import com.android.launcher3.states.RotationHelper;
+import com.android.launcher3.statemanager.StateManager.StateListener;
 import com.android.launcher3.uioverrides.plugins.PluginManagerWrapper;
 import com.android.launcher3.util.TraceHelper;
 import com.android.launcher3.views.ScrimView;
+import com.android.quickstep.LauncherActivityInterface;
 import com.android.quickstep.SysUINavigationMode;
-import com.android.quickstep.util.AppWindowAnimationHelper;
-import com.android.quickstep.util.AppWindowAnimationHelper.TransformParams;
-import com.android.quickstep.util.LayoutUtils;
+import com.android.quickstep.util.TransformParams;
 import com.android.systemui.plugins.PluginListener;
 import com.android.systemui.plugins.RecentsExtraCard;
 
@@ -63,9 +57,7 @@ import com.android.systemui.plugins.RecentsExtraCard;
  */
 @TargetApi(Build.VERSION_CODES.O)
 public class LauncherRecentsView extends RecentsView<BaseQuickstepLauncher>
-        implements StateListener {
-
-    private static final Rect sTempRect = new Rect();
+        implements StateListener<LauncherState> {
 
     private final TransformParams mTransformParams = new TransformParams();
 
@@ -88,10 +80,6 @@ public class LauncherRecentsView extends RecentsView<BaseQuickstepLauncher>
         }
     };
 
-    private RotationHelper.ForcedRotationChangedListener mForcedRotationChangedListener =
-            isForcedRotation -> LauncherRecentsView.this
-                    .disableMultipleLayoutRotations(!isForcedRotation);
-
     public LauncherRecentsView(Context context) {
         this(context, null);
     }
@@ -101,9 +89,14 @@ public class LauncherRecentsView extends RecentsView<BaseQuickstepLauncher>
     }
 
     public LauncherRecentsView(Context context, AttributeSet attrs, int defStyleAttr) {
-        super(context, attrs, defStyleAttr);
-        setContentAlpha(0);
+        super(context, attrs, defStyleAttr, LauncherActivityInterface.INSTANCE);
         mActivity.getStateManager().addStateListener(this);
+    }
+
+    @Override
+    public void init(OverviewActionsView actionsView) {
+        super.init(actionsView);
+        setContentAlpha(0);
     }
 
     @Override
@@ -128,31 +121,12 @@ public class LauncherRecentsView extends RecentsView<BaseQuickstepLauncher>
         }
     }
 
-    @Override
-    public void draw(Canvas canvas) {
-        maybeDrawEmptyMessage(canvas);
-        super.draw(canvas);
-    }
-
-    @Override
-    public void onViewAdded(View child) {
-        super.onViewAdded(child);
-        updateEmptyMessage();
-    }
-
-    @Override
-    protected void onTaskStackUpdated() {
-        // Lazily update the empty message only when the task stack is reapplied
-        updateEmptyMessage();
-    }
-
     /**
      * Animates adjacent tasks and translate hotseat off screen as well.
      */
     @Override
-    public AnimatorSet createAdjacentPageAnimForTaskLaunch(TaskView tv,
-            AppWindowAnimationHelper helper) {
-        AnimatorSet anim = super.createAdjacentPageAnimForTaskLaunch(tv, helper);
+    public AnimatorSet createAdjacentPageAnimForTaskLaunch(TaskView tv) {
+        AnimatorSet anim = super.createAdjacentPageAnimForTaskLaunch(tv);
 
         if (!SysUINavigationMode.getMode(mActivity).hasGestures) {
             // Hotseat doesn't move when opening recents with the button,
@@ -179,39 +153,12 @@ public class LauncherRecentsView extends RecentsView<BaseQuickstepLauncher>
     }
 
     @Override
-    protected void getTaskSize(DeviceProfile dp, Rect outRect) {
-        LayoutUtils.calculateLauncherTaskSize(getContext(), dp, outRect);
-    }
-
-    /**
-     * @return The translationX to apply to this view so that the first task is just offscreen.
-     */
-    public float getOffscreenTranslationX(float recentsScale) {
-        LauncherState.ScaleAndTranslation overviewScaleAndTranslation =
-            NORMAL.getOverviewScaleAndTranslation(mActivity);
-        float offscreen = mOrientationHandler.getTranslationValue(overviewScaleAndTranslation);
-        // Offset since scale pushes tasks outwards.
-        getTaskSize(sTempRect);
-        int taskSize = mOrientationHandler.getPrimarySize(sTempRect);
-        offscreen += taskSize * (recentsScale - 1) / 2;
-        if (mRunningTaskTileHidden) {
-            // The first task is hidden, so offset by its width.
-            offscreen -= (taskSize + getPageSpacing()) * recentsScale;
-        }
-        if (isRtl()) {
-            offscreen = -offscreen;
-        }
-        return offscreen;
-    }
-
-    @Override
     protected void onTaskLaunchAnimationUpdate(float progress, TaskView tv) {
         if (ENABLE_QUICKSTEP_LIVE_TILE.get()) {
             if (tv.isRunningTask()) {
                 mTransformParams.setProgress(1 - progress)
-                        .setCurrentRect(null)
                         .setSyncTransactionApplier(mSyncTransactionApplier);
-                mAppWindowAnimationHelper.applyTransform(mTransformParams);
+                // TODO: Revisit live tiles
             } else {
                 redrawLiveTile(true);
             }
@@ -243,18 +190,10 @@ public class LauncherRecentsView extends RecentsView<BaseQuickstepLauncher>
     }
 
     @Override
-    public void redrawLiveTile(boolean mightNeedToRefill) {
-        AppWindowAnimationHelper.TransformParams transformParams = getLiveTileParams(mightNeedToRefill);
-        if (transformParams != null) {
-            mAppWindowAnimationHelper.applyTransform(transformParams);
-        }
-    }
-
-    @Override
-    public AppWindowAnimationHelper.TransformParams getLiveTileParams(
+    public TransformParams getLiveTileParams(
             boolean mightNeedToRefill) {
         if (!mEnableDrawingLiveTile || mRecentsAnimationController == null
-                || mRecentsAnimationTargets == null || mAppWindowAnimationHelper == null) {
+                || mRecentsAnimationTargets == null) {
             return null;
         }
         TaskView taskView = getRunningTaskView();
@@ -274,21 +213,12 @@ public class LauncherRecentsView extends RecentsView<BaseQuickstepLauncher>
             if (mightNeedToRefill && offsetY > 0) {
                 mTempRect.top -= offsetY;
             }
-            mTempRectF.set(mTempRect);
             mTransformParams.setProgress(1f)
-                    .setCurrentRect(mTempRectF)
                     .setTargetAlpha(taskView.getAlpha())
                     .setSyncTransactionApplier(mSyncTransactionApplier)
-                    .setTargetSet(mRecentsAnimationTargets)
-                    .setLauncherOnTop(true);
+                    .setTargetSet(mRecentsAnimationTargets);
         }
         return mTransformParams;
-    }
-
-    @Override
-    protected boolean supportsVerticalLandscape() {
-        return FeatureFlags.ENABLE_FIXED_ROTATION_TRANSFORM.get()
-                && !mOrientationState.areMultipleLayoutOrientationsDisabled();
     }
 
     @Override
@@ -312,7 +242,7 @@ public class LauncherRecentsView extends RecentsView<BaseQuickstepLauncher>
             // Clean-up logic that occurs when recents is no longer in use/visible.
             reset();
         }
-        setOverlayEnabled(finalState == OVERVIEW);
+        setOverlayEnabled(finalState == OVERVIEW || finalState == OVERVIEW_MODAL_TASK);
         setFreezeViewVisibility(false);
     }
 
@@ -344,7 +274,6 @@ public class LauncherRecentsView extends RecentsView<BaseQuickstepLauncher>
         super.onAttachedToWindow();
         PluginManagerWrapper.INSTANCE.get(getContext()).addPluginListener(
                 mRecentsExtraCardPluginListener, RecentsExtraCard.class);
-        mActivity.getRotationHelper().addForcedRotationCallback(mForcedRotationChangedListener);
     }
 
     @Override
@@ -352,7 +281,6 @@ public class LauncherRecentsView extends RecentsView<BaseQuickstepLauncher>
         super.onDetachedFromWindow();
         PluginManagerWrapper.INSTANCE.get(getContext()).removePluginListener(
                 mRecentsExtraCardPluginListener);
-        mActivity.getRotationHelper().removeForcedRotationCallback(mForcedRotationChangedListener);
     }
 
     @Override
@@ -411,5 +339,17 @@ public class LauncherRecentsView extends RecentsView<BaseQuickstepLauncher>
     @Override
     protected DepthController getDepthController() {
         return mActivity.getDepthController();
+    }
+
+    @Override
+    public void setModalStateEnabled(boolean isModalState) {
+        super.setModalStateEnabled(isModalState);
+        if (isModalState) {
+            mActivity.getStateManager().goToState(LauncherState.OVERVIEW_MODAL_TASK);
+        } else {
+            if (mActivity.isInState(LauncherState.OVERVIEW_MODAL_TASK)) {
+                mActivity.getStateManager().goToState(LauncherState.OVERVIEW);
+            }
+        }
     }
 }

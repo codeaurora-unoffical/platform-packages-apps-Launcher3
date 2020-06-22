@@ -15,6 +15,8 @@
  */
 package com.android.launcher3.util;
 
+import static android.view.Display.DEFAULT_DISPLAY;
+
 import static com.android.launcher3.util.Executors.UI_HELPER_EXECUTOR;
 
 import android.content.Context;
@@ -26,7 +28,6 @@ import android.os.Message;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Display;
-import android.view.WindowManager;
 
 import androidx.annotation.VisibleForTesting;
 
@@ -45,6 +46,8 @@ public class DefaultDisplay implements DisplayListener {
     public static final int CHANGE_SIZE = 1 << 0;
     public static final int CHANGE_ROTATION = 1 << 1;
     public static final int CHANGE_FRAME_DELAY = 1 << 2;
+
+    public static final int CHANGE_ALL = CHANGE_SIZE | CHANGE_ROTATION | CHANGE_FRAME_DELAY;
 
     private final Context mContext;
     private final int mId;
@@ -142,10 +145,11 @@ public class DefaultDisplay implements DisplayListener {
         }
 
         private Info(Context context) {
-            this(context.getSystemService(WindowManager.class).getDefaultDisplay());
+            this(context, context.getSystemService(DisplayManager.class)
+                    .getDisplay(DEFAULT_DISPLAY));
         }
 
-        public Info(Display display) {
+        public Info(Context context, Display display) {
             id = display.getDisplayId();
             rotation = display.getRotation();
 
@@ -158,8 +162,8 @@ public class DefaultDisplay implements DisplayListener {
             display.getRealSize(realSize);
             display.getCurrentSizeRange(smallestSize, largestSize);
 
-            metrics = new DisplayMetrics();
-            display.getMetrics(metrics);
+            Context defaultDisplayContext = context.createDisplayContext(display);
+            metrics = defaultDisplayContext.getResources().getDisplayMetrics();
         }
 
         private boolean hasDifferentSize(Info info) {

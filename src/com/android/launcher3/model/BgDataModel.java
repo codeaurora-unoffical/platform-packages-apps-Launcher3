@@ -26,16 +26,16 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.util.MutableInt;
 
-import com.android.launcher3.AppInfo;
-import com.android.launcher3.FolderInfo;
 import com.android.launcher3.InstallShortcutReceiver;
-import com.android.launcher3.ItemInfo;
-import com.android.launcher3.LauncherAppWidgetInfo;
 import com.android.launcher3.LauncherSettings;
-import com.android.launcher3.PromiseAppInfo;
 import com.android.launcher3.Workspace;
-import com.android.launcher3.WorkspaceItemInfo;
 import com.android.launcher3.config.FeatureFlags;
+import com.android.launcher3.model.data.AppInfo;
+import com.android.launcher3.model.data.FolderInfo;
+import com.android.launcher3.model.data.ItemInfo;
+import com.android.launcher3.model.data.LauncherAppWidgetInfo;
+import com.android.launcher3.model.data.PromiseAppInfo;
+import com.android.launcher3.model.data.WorkspaceItemInfo;
 import com.android.launcher3.shortcuts.ShortcutKey;
 import com.android.launcher3.shortcuts.ShortcutRequest;
 import com.android.launcher3.util.ComponentKey;
@@ -91,6 +91,11 @@ public class BgDataModel {
      * Map of ShortcutKey to the number of times it is pinned.
      */
     public final Map<ShortcutKey, MutableInt> pinnedShortcutCounts = new HashMap<>();
+
+    /**
+     * List of all cached predicted items visible on home screen
+     */
+    public final ArrayList<AppInfo> cachedPredictedItems = new ArrayList<>();
 
     /**
      * True if the launcher has permission to access deep shortcuts.
@@ -366,5 +371,10 @@ public class BgDataModel {
         void bindDeepShortcutMap(HashMap<ComponentKey, Integer> deepShortcutMap);
 
         void bindAllApplications(AppInfo[] apps);
+
+        /**
+         * Binds predicted appInfos at at available prediction slots.
+         */
+        void bindPredictedItems(List<AppInfo> appInfos, IntArray ranks);
     }
 }

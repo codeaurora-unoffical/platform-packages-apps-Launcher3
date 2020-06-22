@@ -16,13 +16,13 @@
 
 package com.android.quickstep;
 
-import static com.android.launcher3.config.FeatureFlags.ENABLE_OVERVIEW_ACTIONS;
 import static com.android.launcher3.util.MainThreadInitializedObject.forOverride;
 
 import android.content.Context;
 import android.graphics.Insets;
 import android.graphics.Matrix;
 import android.graphics.Rect;
+import android.widget.Toast;
 
 import com.android.launcher3.BaseActivity;
 import com.android.launcher3.BaseDraggingActivity;
@@ -84,16 +84,24 @@ public class TaskOverlayFactory implements ResourceBasedOverride {
     /**
      * Overlay on each task handling Overview Action Buttons.
      */
-    public static class TaskOverlay {
+    public static class TaskOverlay<T extends OverviewActionsView> {
 
         private final Context mApplicationContext;
-        private OverviewActionsView mActionsView;
-        private final TaskThumbnailView mThumbnailView;
+        protected final TaskThumbnailView mThumbnailView;
 
+        private T mActionsView;
 
         protected TaskOverlay(TaskThumbnailView taskThumbnailView) {
             mApplicationContext = taskThumbnailView.getContext().getApplicationContext();
             mThumbnailView = taskThumbnailView;
+        }
+
+        protected T getActionsView() {
+            if (mActionsView == null) {
+                mActionsView = BaseActivity.fromContext(mThumbnailView.getContext()).findViewById(
+                        R.id.overview_actions_view);
+            }
+            return mActionsView;
         }
 
         /**
@@ -102,40 +110,35 @@ public class TaskOverlayFactory implements ResourceBasedOverride {
         public void initOverlay(Task task, ThumbnailData thumbnail, Matrix matrix) {
             ImageActionsApi imageApi = new ImageActionsApi(
                     mApplicationContext, mThumbnailView::getThumbnail);
+            final boolean isAllowedByPolicy = thumbnail.isRealSnapshot;
 
-            if (mActionsView == null && ENABLE_OVERVIEW_ACTIONS.get()
-                    && SysUINavigationMode.removeShelfFromOverview(mApplicationContext)) {
-                mActionsView = BaseActivity.fromContext(mThumbnailView.getContext()).findViewById(
-                        R.id.overview_actions_view);
-            }
-            if (mActionsView != null) {
-                mActionsView.setListener(new OverviewActionsView.Listener() {
-                    @Override
-                    public void onShare() {
+            getActionsView().setCallbacks(new OverlayUICallbacks() {
+                @Override
+                public void onShare() {
+                    if (isAllowedByPolicy) {
                         imageApi.startShareActivity();
+                    } else {
+                        showBlockedByPolicyMessage();
                     }
+                }
 
-                    @Override
-                    public void onScreenshot() {
+                @Override
+                public void onScreenshot() {
+                    if (isAllowedByPolicy) {
                         imageApi.saveScreenshot(mThumbnailView.getThumbnail(),
-                                getTaskSnapshotBounds(), getTaskSnapshotInsets(), task.key.id);
+                                getTaskSnapshotBounds(), getTaskSnapshotInsets(), task.key);
+                    } else {
+                        showBlockedByPolicyMessage();
                     }
-                });
-            }
-
+                }
+            });
         }
+
 
         /**
          * Called when the overlay is no longer used.
          */
         public void reset() {
-        }
-
-        /**
-         * Whether the overlay is modal, which means only tapping is enabled, but no swiping.
-         */
-        public boolean isOverlayModal() {
-            return false;
         }
 
         /**
@@ -160,5 +163,24 @@ public class TaskOverlayFactory implements ResourceBasedOverride {
             // TODO: return the real insets
             return Insets.of(0, 0, 0, 0);
         }
+
+        private void showBlockedByPolicyMessage() {
+            Toast.makeText(
+                    mThumbnailView.getContext(),
+                    R.string.blocked_by_policy,
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /**
+     * Callbacks the Ui can generate. This is the only way for a Ui to call methods on the
+     * controller.
+     */
+    public interface OverlayUICallbacks {
+        /** User has indicated they want to share the current task. */
+        void onShare();
+
+        /** User has indicated they want to screenshot the current task. */
+        void onScreenshot();
     }
 }

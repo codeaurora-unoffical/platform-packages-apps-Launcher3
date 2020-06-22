@@ -21,8 +21,8 @@ import static com.android.quickstep.AnimatedFloat.VALUE;
 
 import com.android.launcher3.BaseQuickstepLauncher;
 import com.android.launcher3.LauncherState;
-import com.android.launcher3.LauncherStateManager;
 import com.android.launcher3.anim.PendingAnimation;
+import com.android.launcher3.statemanager.StateManager.StateHandler;
 import com.android.launcher3.states.StateAnimationConfig;
 import com.android.launcher3.util.UiThreadHelper;
 import com.android.quickstep.AnimatedFloat;
@@ -32,7 +32,7 @@ import com.android.quickstep.SystemUiProxy;
 /**
  * State handler for animating back button alpha
  */
-public class BackButtonAlphaHandler implements LauncherStateManager.StateHandler {
+public class BackButtonAlphaHandler implements StateHandler<LauncherState> {
 
     private final BaseQuickstepLauncher mLauncher;
     private final AnimatedFloat mBackAlpha = new AnimatedFloat(this::updateBackAlpha);
@@ -59,7 +59,8 @@ public class BackButtonAlphaHandler implements LauncherStateManager.StateHandler
         }
 
         mBackAlpha.value = SystemUiProxy.INSTANCE.get(mLauncher).getLastBackButtonAlpha();
-        animation.setFloat(mBackAlpha, VALUE, toState.hideBackButton ? 0 : 1, LINEAR);
+        animation.setFloat(mBackAlpha, VALUE,
+                mLauncher.shouldBackButtonBeHidden(toState) ? 0 : 1, LINEAR);
     }
 
     private void updateBackAlpha() {

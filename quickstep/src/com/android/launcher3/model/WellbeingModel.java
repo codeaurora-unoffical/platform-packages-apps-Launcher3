@@ -45,8 +45,8 @@ import android.util.Log;
 import androidx.annotation.MainThread;
 
 import com.android.launcher3.BaseDraggingActivity;
-import com.android.launcher3.ItemInfo;
 import com.android.launcher3.R;
+import com.android.launcher3.model.data.ItemInfo;
 import com.android.launcher3.popup.RemoteActionShortcut;
 import com.android.launcher3.popup.SystemShortcut;
 import com.android.launcher3.util.MainThreadInitializedObject;
@@ -77,6 +77,7 @@ public final class WellbeingModel {
     private static final String EXTRA_ACTION = "action";
     private static final String EXTRA_MAX_NUM_ACTIONS_SHOWN = "max_num_actions_shown";
     private static final String EXTRA_PACKAGES = "packages";
+    private static final String EXTRA_SUCCESS = "success";
 
     public static final MainThreadInitializedObject<WellbeingModel> INSTANCE =
             new MainThreadInitializedObject<>(WellbeingModel::new);
@@ -221,6 +222,7 @@ public final class WellbeingModel {
             params.putInt(EXTRA_MAX_NUM_ACTIONS_SHOWN, 1);
             // Perform wellbeing call .
             remoteActionBundle = client.call(METHOD_GET_ACTIONS, null, params);
+            if (!remoteActionBundle.getBoolean(EXTRA_SUCCESS, true)) return false;
 
             synchronized (mModelLock) {
                 // Remove the entries for requested packages, and then update the fist with what we
@@ -281,9 +283,9 @@ public final class WellbeingModel {
                 // Remove all existing messages
                 mWorkerHandler.removeCallbacksAndMessages(null);
                 final String[] packageNames = mContext.getSystemService(LauncherApps.class)
-                            .getActivityList(null, Process.myUserHandle()).stream()
-                            .map(li -> li.getApplicationInfo().packageName).distinct()
-                            .toArray(String[]::new);
+                        .getActivityList(null, Process.myUserHandle()).stream()
+                        .map(li -> li.getApplicationInfo().packageName).distinct()
+                        .toArray(String[]::new);
                 if (!updateActions(packageNames)) {
                     scheduleRefreshRetry(msg);
                 }

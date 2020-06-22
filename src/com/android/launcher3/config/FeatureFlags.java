@@ -36,8 +36,6 @@ public final class FeatureFlags {
     private static final List<DebugFlag> sDebugFlags = new ArrayList<>();
 
     public static final String FLAGS_PREF_NAME = "featureFlags";
-    public static final String FLAG_ENABLE_FIXED_ROTATION_TRANSFORM =
-            "ENABLE_FIXED_ROTATION_TRANSFORM";
 
     private FeatureFlags() { }
 
@@ -92,8 +90,9 @@ public final class FeatureFlags {
     public static final BooleanFlag ENABLE_QUICKSTEP_LIVE_TILE = getDebugFlag(
             "ENABLE_QUICKSTEP_LIVE_TILE", false, "Enable live tile in Quickstep overview");
 
-    public static final BooleanFlag ENABLE_HINTS_IN_OVERVIEW = getDebugFlag(
-            "ENABLE_HINTS_IN_OVERVIEW", false, "Show chip hints and gleams on the overview screen");
+    // Keep as DeviceFlag to allow remote disable in emergency.
+    public static final BooleanFlag ENABLE_SUGGESTED_ACTIONS_OVERVIEW = new DeviceFlag(
+            "ENABLE_SUGGESTED_ACTIONS_OVERVIEW", false, "Show chip hints on the overview screen");
 
     public static final BooleanFlag FOLDER_NAME_SUGGEST = new DeviceFlag(
             "FOLDER_NAME_SUGGEST", true,
@@ -104,10 +103,13 @@ public final class FeatureFlags {
             "Adds localized title and keyword search and ranking");
 
     public static final BooleanFlag ENABLE_PREDICTION_DISMISS = getDebugFlag(
-            "ENABLE_PREDICTION_DISMISS", false, "Allow option to dimiss apps from predicted list");
+            "ENABLE_PREDICTION_DISMISS", true, "Allow option to dimiss apps from predicted list");
 
     public static final BooleanFlag ENABLE_QUICK_CAPTURE_GESTURE = getDebugFlag(
             "ENABLE_QUICK_CAPTURE_GESTURE", true, "Swipe from right to left to quick capture");
+
+    public static final BooleanFlag ENABLE_QUICK_CAPTURE_WINDOW = getDebugFlag(
+            "ENABLE_QUICK_CAPTURE_WINDOW", false, "Use window to host quick capture");
 
     public static final BooleanFlag FORCE_LOCAL_OVERSCROLL_PLUGIN = getDebugFlag(
             "FORCE_LOCAL_OVERSCROLL_PLUGIN", false,
@@ -117,8 +119,8 @@ public final class FeatureFlags {
             "ASSISTANT_GIVES_LAUNCHER_FOCUS", false,
             "Allow Launcher to handle nav bar gestures while Assistant is running over it");
 
-    public static final BooleanFlag ENABLE_HYBRID_HOTSEAT = new DeviceFlag(
-            "ENABLE_HYBRID_HOTSEAT", false, "Fill gaps in hotseat with predicted apps");
+    public static final BooleanFlag ENABLE_HYBRID_HOTSEAT = getDebugFlag(
+            "ENABLE_HYBRID_HOTSEAT", true, "Fill gaps in hotseat with predicted apps");
 
     public static final BooleanFlag HOTSEAT_MIGRATE_TO_FOLDER = new DeviceFlag(
             "HOTSEAT_MIGRATE_TO_FOLDER", false, "Should move hotseat items into a folder");
@@ -127,7 +129,7 @@ public final class FeatureFlags {
             "ENABLE_DEEP_SHORTCUT_ICON_CACHE", true, "R/W deep shortcut in IconCache");
 
     public static final BooleanFlag MULTI_DB_GRID_MIRATION_ALGO = getDebugFlag(
-            "MULTI_DB_GRID_MIRATION_ALGO", false, "Use the multi-db grid migration algorithm");
+            "MULTI_DB_GRID_MIRATION_ALGO", true, "Use the multi-db grid migration algorithm");
 
     public static final BooleanFlag ENABLE_LAUNCHER_PREVIEW_IN_GRID_PICKER = getDebugFlag(
             "ENABLE_LAUNCHER_PREVIEW_IN_GRID_PICKER", true, "Show launcher preview in grid picker");
@@ -139,8 +141,12 @@ public final class FeatureFlags {
             "ENABLE_OVERVIEW_ACTIONS", true, "Show app actions instead of the shelf in Overview."
             + " As part of this decoupling, also distinguish swipe up from nav bar vs above it.");
 
-    public static final BooleanFlag ENABLE_SELECT_MODE = getDebugFlag(
-            "ENABLE_SELECT_MODE", true, "Show Select Mode button in Overview Actions");
+    // Keep as DeviceFlag for remote disable in emergency.
+    public static final BooleanFlag ENABLE_OVERVIEW_SELECTIONS = new DeviceFlag(
+            "ENABLE_OVERVIEW_SELECTIONS", true, "Show Select Mode button in Overview Actions");
+
+    public static final BooleanFlag ENABLE_OVERVIEW_SHARE = getDebugFlag(
+            "ENABLE_OVERVIEW_SHARE", false, "Show Share button in Overview Actions");
 
     public static final BooleanFlag ENABLE_DATABASE_RESTORE = getDebugFlag(
             "ENABLE_DATABASE_RESTORE", true,
@@ -159,15 +165,20 @@ public final class FeatureFlags {
             "ALWAYS_USE_HARDWARE_OPTIMIZATION_FOR_FOLDER_ANIMATIONS", false,
             "Always use hardware optimization for folder animations.");
 
-    public static final BooleanFlag ENABLE_FIXED_ROTATION_TRANSFORM = getDebugFlag(
-            FLAG_ENABLE_FIXED_ROTATION_TRANSFORM, true,
-            "Launch/close apps without rotation animation. Fix Launcher to portrait");
+    public static final BooleanFlag ENABLE_ALL_APPS_EDU = getDebugFlag(
+            "ENABLE_ALL_APPS_EDU", true,
+            "Shows user a tutorial on how to get to All Apps after X amount of attempts.");
+
+    public static final BooleanFlag SEPARATE_RECENTS_ACTIVITY = getDebugFlag(
+            "SEPARATE_RECENTS_ACTIVITY", false,
+            "Uses a separate recents activity instead of using the integrated recents+Launcher UI");
 
     public static void initialize(Context context) {
         synchronized (sDebugFlags) {
             for (DebugFlag flag : sDebugFlags) {
                 flag.initialize(context);
             }
+            sDebugFlags.sort((f1, f2) -> f1.key.compareToIgnoreCase(f2.key));
         }
     }
 
@@ -178,10 +189,20 @@ public final class FeatureFlags {
     }
 
     public static void dump(PrintWriter pw) {
-        pw.println("FeatureFlags:");
+        pw.println("DeviceFlags:");
         synchronized (sDebugFlags) {
             for (DebugFlag flag : sDebugFlags) {
-                pw.println("  " + flag.key + "=" + flag.get());
+                if (flag instanceof DeviceFlag) {
+                    pw.println("  " + flag.toString());
+                }
+            }
+        }
+        pw.println("DebugFlags:");
+        synchronized (sDebugFlags) {
+            for (DebugFlag flag : sDebugFlags) {
+                if (!(flag instanceof DeviceFlag)) {
+                    pw.println("  " + flag.toString());
+                }
             }
         }
     }
@@ -202,13 +223,11 @@ public final class FeatureFlags {
 
         @Override
         public String toString() {
-            return appendProps(new StringBuilder()
-                    .append(getClass().getSimpleName()).append('{'))
-                    .append('}').toString();
+            return appendProps(new StringBuilder()).toString();
         }
 
         protected StringBuilder appendProps(StringBuilder src) {
-            return src.append("key=").append(key).append(", defaultValue=").append(defaultValue);
+            return src.append(key).append(", defaultValue=").append(defaultValue);
         }
 
         public void addChangeListener(Context context, Runnable r) { }
@@ -240,8 +259,7 @@ public final class FeatureFlags {
 
         @Override
         protected StringBuilder appendProps(StringBuilder src) {
-            return super.appendProps(src).append(", mCurrentValue=").append(mCurrentValue)
-                    .append(", description=").append(description);
+            return super.appendProps(src).append(", mCurrentValue=").append(mCurrentValue);
         }
     }
 

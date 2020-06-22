@@ -46,11 +46,11 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.android.launcher3.DropTarget;
-import com.android.launcher3.ItemInfo;
 import com.android.launcher3.R;
 import com.android.launcher3.Utilities;
 import com.android.launcher3.config.FeatureFlags;
 import com.android.launcher3.logging.StatsLogUtils.LogContainerProvider;
+import com.android.launcher3.model.data.ItemInfo;
 import com.android.launcher3.userevent.LauncherLogProto;
 import com.android.launcher3.userevent.nano.LauncherLogProto.Action;
 import com.android.launcher3.userevent.nano.LauncherLogProto.LauncherEvent;
@@ -145,7 +145,9 @@ public class UserEventDispatcher implements ResourceBasedOverride {
         LauncherEvent event = newLauncherEvent(action,  targets);
         ItemInfo info = v == null ? null : (ItemInfo) v.getTag();
         if (info != null && Utilities.IS_DEBUG_DEVICE && FeatureFlags.ENABLE_HYBRID_HOTSEAT.get()) {
-            FileLog.d(TAG, "appLaunch: packageName:" + info.getTargetComponent().getPackageName()
+            final String pkg = info.getTargetComponent() != null
+                    ? info.getTargetComponent().getPackageName() : "unknown";
+            FileLog.d(TAG, "appLaunch: packageName:" + pkg
                     + ",isWorkApp:" + (info.user != null && !Process.myUserHandle().equals(
                     userHandle)) + ",launchLocation:" + info.container);
         }

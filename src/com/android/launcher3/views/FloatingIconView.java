@@ -19,7 +19,6 @@ import static com.android.launcher3.LauncherAnimUtils.DRAWABLE_ALPHA;
 import static com.android.launcher3.Utilities.getBadge;
 import static com.android.launcher3.Utilities.getFullDrawable;
 import static com.android.launcher3.config.FeatureFlags.ADAPTIVE_ICON_WINDOW_ANIM;
-import static com.android.launcher3.states.RotationHelper.REQUEST_LOCK;
 import static com.android.launcher3.util.Executors.MODEL_EXECUTOR;
 
 import android.animation.Animator;
@@ -50,7 +49,6 @@ import androidx.annotation.WorkerThread;
 import com.android.launcher3.BubbleTextView;
 import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.InsettableFrameLayout;
-import com.android.launcher3.ItemInfo;
 import com.android.launcher3.Launcher;
 import com.android.launcher3.R;
 import com.android.launcher3.Utilities;
@@ -58,8 +56,10 @@ import com.android.launcher3.dragndrop.DragLayer;
 import com.android.launcher3.dragndrop.FolderAdaptiveIcon;
 import com.android.launcher3.folder.FolderIcon;
 import com.android.launcher3.icons.LauncherIcons;
+import com.android.launcher3.model.data.ItemInfo;
 import com.android.launcher3.popup.SystemShortcut;
 import com.android.launcher3.shortcuts.DeepShortcutView;
+import com.android.launcher3.testing.TestProtocol;
 
 /**
  * A view that is created to look like another view with the purpose of creating fluid animations.
@@ -100,6 +100,7 @@ public class FloatingIconView extends FrameLayout implements
 
     private AnimatorSet mFadeAnimatorSet;
     private ListenerView mListenerView;
+    private Runnable mFastFinishRunnable;
 
     public FloatingIconView(Context context) {
         this(context, null);
@@ -124,7 +125,6 @@ public class FloatingIconView extends FrameLayout implements
         super.onAttachedToWindow();
         if (!mIsOpening) {
             getViewTreeObserver().addOnGlobalLayoutListener(this);
-            mLauncher.getRotationHelper().setCurrentTransitionRequest(REQUEST_LOCK);
         }
     }
 
@@ -162,7 +162,7 @@ public class FloatingIconView extends FrameLayout implements
         float scale = Math.max(1f, Math.min(scaleX, scaleY));
 
         mClipIconView.update(rect, progress, shapeProgressStart, cornerRadius, isOpening, scale,
-                minSize, lp);
+                minSize, lp, mIsVerticalBarLayout);
 
         setPivotX(0);
         setPivotY(0);
@@ -336,7 +336,7 @@ public class FloatingIconView extends FrameLayout implements
         final InsettableFrameLayout.LayoutParams lp =
                 (InsettableFrameLayout.LayoutParams) getLayoutParams();
         mBadge = badge;
-        mClipIconView.setIcon(drawable, iconOffset, lp, mIsOpening);
+        mClipIconView.setIcon(drawable, iconOffset, lp, mIsOpening, mIsVerticalBarLayout);
         if (drawable instanceof AdaptiveIconDrawable) {
             final int originalHeight = lp.height;
             final int originalWidth = lp.width;
@@ -444,9 +444,21 @@ public class FloatingIconView extends FrameLayout implements
         }
     }
 
+    /**
+     * Sets a runnable that is called after a call to {@link #fastFinish()}.
+     */
+    public void setFastFinishRunnable(Runnable runnable) {
+        mFastFinishRunnable = runnable;
+    }
+
     public void fastFinish() {
+        if (mFastFinishRunnable != null) {
+            mFastFinishRunnable.run();
+            mFastFinishRunnable = null;
+        }
         if (mLoadIconSignal != null) {
             mLoadIconSignal.cancel();
+            mLoadIconSignal = null;
         }
         if (mEndRunnable != null) {
             mEndRunnable.run();
@@ -549,6 +561,11 @@ public class FloatingIconView extends FrameLayout implements
         view.setVisibility(INVISIBLE);
         parent.addView(view);
         dragLayer.addView(view.mListenerView);
+        if (TestProtocol.sDebugTracing) {
+            Log.d(TestProtocol.PAUSE_NOT_DETECTED, "getFloatingIconView. listenerView "
+                    + "added to dragLayer. listenerView=" + view.mListenerView + ", fiv=" + view,
+                    new Exception());
+        }
         view.mListenerView.setListener(view::fastFinish);
 
         view.mEndRunnable = () -> {
@@ -628,6 +645,10 @@ public class FloatingIconView extends FrameLayout implements
     private void finish(DragLayer dragLayer) {
         ((ViewGroup) dragLayer.getParent()).removeView(this);
         dragLayer.removeView(mListenerView);
+        if (TestProtocol.sDebugTracing) {
+            Log.d(TestProtocol.PAUSE_NOT_DETECTED, "listenerView removed from dragLayer. "
+                    + "listenerView=" + mListenerView + ", fiv=" + this, new Exception());
+        }
         recycle();
         mLauncher.getViewCache().recycleView(R.layout.floating_icon_view, this);
     }
@@ -656,6 +677,7 @@ public class FloatingIconView extends FrameLayout implements
         sTmpObjArray[0] = null;
         mIconLoadResult = null;
         mClipIconView.recycle();
+        mFastFinishRunnable = null;
     }
 
     private static class IconLoadResult {

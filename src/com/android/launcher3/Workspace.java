@@ -19,6 +19,9 @@ package com.android.launcher3;
 import static com.android.launcher3.LauncherAnimUtils.SPRING_LOADED_EXIT_DELAY;
 import static com.android.launcher3.LauncherSettings.Favorites.ITEM_TYPE_APPLICATION;
 import static com.android.launcher3.LauncherState.ALL_APPS;
+import static com.android.launcher3.LauncherState.FLAG_MULTI_PAGE;
+import static com.android.launcher3.LauncherState.FLAG_WORKSPACE_ICONS_CAN_BE_DRAGGED;
+import static com.android.launcher3.LauncherState.FLAG_WORKSPACE_INACCESSIBLE;
 import static com.android.launcher3.LauncherState.NORMAL;
 import static com.android.launcher3.LauncherState.OVERVIEW;
 import static com.android.launcher3.LauncherState.SPRING_LOADED;
@@ -76,9 +79,17 @@ import com.android.launcher3.folder.PreviewBackground;
 import com.android.launcher3.graphics.DragPreviewProvider;
 import com.android.launcher3.graphics.PreloadIconDrawable;
 import com.android.launcher3.icons.BitmapRenderer;
+import com.android.launcher3.logging.StatsLogManager;
+import com.android.launcher3.logging.StatsLogManager.LauncherEvent;
 import com.android.launcher3.logging.UserEventDispatcher;
+import com.android.launcher3.model.data.AppInfo;
+import com.android.launcher3.model.data.FolderInfo;
+import com.android.launcher3.model.data.ItemInfo;
+import com.android.launcher3.model.data.LauncherAppWidgetInfo;
+import com.android.launcher3.model.data.WorkspaceItemInfo;
 import com.android.launcher3.pageindicators.WorkspacePageIndicator;
 import com.android.launcher3.popup.PopupContainerWithArrow;
+import com.android.launcher3.statemanager.StateManager.StateHandler;
 import com.android.launcher3.states.StateAnimationConfig;
 import com.android.launcher3.touch.WorkspaceTouchListener;
 import com.android.launcher3.userevent.nano.LauncherLogProto.Action;
@@ -109,7 +120,7 @@ import java.util.function.Predicate;
  */
 public class Workspace extends PagedView<WorkspacePageIndicator>
         implements DropTarget, DragSource, View.OnTouchListener,
-        DragController.DragListener, Insettable, LauncherStateManager.StateHandler,
+        DragController.DragListener, Insettable, StateHandler<LauncherState>,
         WorkspaceLayoutManager {
 
     /** The value that {@link #mTransitionProgress} must be greater than for
@@ -238,6 +249,8 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
     // Handles workspace state transitions
     private final WorkspaceStateTransitionAnimation mStateTransitionAnimation;
 
+    private final StatsLogManager mStatsLogManager;
+
     /**
      * Used to inflate the Workspace from XML.
      *
@@ -270,6 +283,7 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
         // Disable multitouch across the workspace/all apps/customize tray
         setMotionEventSplittingEnabled(true);
         setOnTouchListener(new WorkspaceTouchListener(mLauncher, this));
+        mStatsLogManager = StatsLogManager.newInstance(context);
     }
 
     @Override
@@ -349,7 +363,7 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
     }
 
     @Override
-    public void onDragStart(DropTarget.DragObject dragObject, DragOptions options) {
+    public void onDragStart(DragObject dragObject, DragOptions options) {
         if (ENFORCE_DRAG_EVENT_ORDER) {
             enforceDragParity("onDragStart", 0, 0);
         }
@@ -401,6 +415,14 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
 
         // Always enter the spring loaded mode
         mLauncher.getStateManager().goToState(SPRING_LOADED);
+        mStatsLogManager.log(
+                LauncherEvent.LAUNCHER_ITEM_DRAG_STARTED,
+                dragObject.logInstanceId,
+                dragObject.dragSource instanceof Folder
+                        ? dragObject.originalDragInfo
+                                .buildProto(((Folder) dragObject.dragSource).mInfo)
+                        : dragObject.originalDragInfo.buildProto()
+        );
     }
 
     public void deferRemoveExtraEmptyScreen() {
@@ -1203,7 +1225,7 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
 
     /** Returns whether a drag should be allowed to be started from the current workspace state. */
     public boolean workspaceIconsCanBeDragged() {
-        return mLauncher.getStateManager().getState().workspaceIconsCanBeDragged;
+        return mLauncher.getStateManager().getState().hasFlag(FLAG_WORKSPACE_ICONS_CAN_BE_DRAGGED);
     }
 
     private void updateChildrenLayersEnabled() {
@@ -1313,7 +1335,7 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
 
         // Invalidate the pages now, so that we have the visible pages before the
         // animation is started
-        if (toState.hasMultipleVisiblePages) {
+        if (toState.hasFlag(FLAG_MULTI_PAGE)) {
             mForceDrawAdjacentPages = true;
         }
         invalidate(); // This will call dispatchDraw(), which calls getVisiblePages().
@@ -1331,7 +1353,10 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
 
     public void updateAccessibilityFlags() {
         // TODO: Update the accessibility flags appropriately when dragging.
-        int accessibilityFlag = mLauncher.getStateManager().getState().workspaceAccessibilityFlag;
+        int accessibilityFlag =
+                mLauncher.getStateManager().getState().hasFlag(FLAG_WORKSPACE_INACCESSIBLE)
+                        ? IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                        : IMPORTANT_FOR_ACCESSIBILITY_AUTO;
         if (!mLauncher.getAccessibilityDelegate().isInAccessibleDrag()) {
             int total = getPageCount();
             for (int i = 0; i < total; i++) {
@@ -1417,6 +1442,10 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
 
         mOutlineProvider = previewProvider;
 
+        if (draggableView == null && child instanceof DraggableView) {
+            draggableView = (DraggableView) child;
+        }
+
         // The drag bitmap follows the touch point around on the screen
         final Bitmap b = previewProvider.createDragBitmap();
         int halfPadding = previewProvider.previewPadding / 2;
@@ -1427,12 +1456,8 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
         Point dragVisualizeOffset = null;
         Rect dragRect = new Rect();
 
-        if (draggableView == null && child instanceof DraggableView) {
-            draggableView = (DraggableView) child;
-        }
-
         if (draggableView != null) {
-            draggableView.getVisualDragBounds(dragRect);
+            draggableView.getSourceVisualDragBounds(dragRect);
             dragLayerY += dragRect.top;
             dragVisualizeOffset = new Point(- halfPadding, halfPadding);
         }
@@ -1625,7 +1650,10 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
             Rect folderLocation = new Rect();
             float scale = mLauncher.getDragLayer().getDescendantRectRelativeToSelf(v, folderLocation);
             target.removeView(v);
-
+            mStatsLogManager.log(
+                    LauncherEvent.LAUNCHER_ITEM_DROP_FOLDER_CREATED,
+                    d.logInstanceId,
+                    destInfo.buildProto(null));
             FolderIcon fi = mLauncher.addFolder(target, container, screenId, targetCell[0],
                     targetCell[1]);
             destInfo.cellX = -1;
@@ -1663,6 +1691,10 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
         if (dropOverView instanceof FolderIcon) {
             FolderIcon fi = (FolderIcon) dropOverView;
             if (fi.acceptDrop(d.dragInfo)) {
+                mStatsLogManager.log(
+                        LauncherEvent.LAUNCHER_ITEM_DROP_COMPLETED,
+                        d.logInstanceId,
+                        fi.mInfo.buildProto(null));
                 fi.onDrop(d, false /* itemReturnedOnFailedDrop */);
 
                 // if the drag started here, we need to remove it from the workspace
@@ -1678,6 +1710,7 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
     @Override
     public void prepareAccessibilityDrop() { }
 
+    @Override
     public void onDrop(final DragObject d, DragOptions options) {
         mDragViewVisualCenter = d.getVisualCenter(mDragViewVisualCenter);
         CellLayout dropTargetLayout = mDropToLayout;
@@ -1864,6 +1897,10 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
 
             mLauncher.getStateManager().goToState(
                     NORMAL, SPRING_LOADED_EXIT_DELAY, onCompleteRunnable);
+            mStatsLogManager.log(
+                    LauncherEvent.LAUNCHER_ITEM_DROP_COMPLETED,
+                    d.logInstanceId,
+                    d.dragInfo.buildProto(null));
         }
 
         if (d.stateAnnouncer != null && !droppedOnOriginalCell) {
@@ -2401,6 +2438,10 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
                     // widgets/shortcuts/folders in a slightly different way
                     mLauncher.addPendingItem(pendingInfo, container, screenId, mTargetCell,
                             item.spanX, item.spanY);
+                    mStatsLogManager.log(
+                            LauncherEvent.LAUNCHER_ITEM_DROP_COMPLETED,
+                            d.logInstanceId,
+                            d.dragInfo.buildProto(null));
                 }
             };
             boolean isWidget = pendingInfo.itemType == LauncherSettings.Favorites.ITEM_TYPE_APPWIDGET
@@ -2489,7 +2530,12 @@ public class Workspace extends PagedView<WorkspacePageIndicator>
                 mLauncher.getDragLayer().animateViewIntoPosition(d.dragView, view, this);
                 resetTransitionTransform();
             }
+            mStatsLogManager.log(
+                    LauncherEvent.LAUNCHER_ITEM_DROP_COMPLETED,
+                    d.logInstanceId,
+                    d.dragInfo.buildProto(null));
         }
+
     }
 
     public Bitmap createWidgetBitmap(ItemInfo widgetInfo, View layout) {

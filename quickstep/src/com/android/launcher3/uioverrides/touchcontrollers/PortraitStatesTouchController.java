@@ -22,14 +22,17 @@ import static com.android.launcher3.LauncherState.OVERVIEW;
 import static com.android.launcher3.anim.Interpolators.ACCEL;
 import static com.android.launcher3.anim.Interpolators.DEACCEL;
 import static com.android.launcher3.anim.Interpolators.LINEAR;
+import static com.android.launcher3.config.FeatureFlags.ENABLE_OVERVIEW_ACTIONS;
 import static com.android.launcher3.config.FeatureFlags.UNSTABLE_SPRINGS;
 import static com.android.launcher3.states.StateAnimationConfig.ANIM_ALL_APPS_FADE;
 import static com.android.launcher3.states.StateAnimationConfig.ANIM_OVERVIEW_FADE;
 import static com.android.launcher3.states.StateAnimationConfig.ANIM_VERTICAL_PROGRESS;
+import static com.android.quickstep.SysUINavigationMode.removeShelfFromOverview;
 import static com.android.systemui.shared.system.QuickStepContract.SYSUI_STATE_OVERVIEW_DISABLED;
 
 import android.animation.TimeInterpolator;
 import android.animation.ValueAnimator;
+import android.util.Log;
 import android.view.MotionEvent;
 import android.view.animation.Interpolator;
 
@@ -41,6 +44,7 @@ import com.android.launcher3.allapps.AllAppsTransitionController;
 import com.android.launcher3.anim.Interpolators;
 import com.android.launcher3.states.StateAnimationConfig;
 import com.android.launcher3.states.StateAnimationConfig.AnimationFlags;
+import com.android.launcher3.testing.TestProtocol;
 import com.android.launcher3.touch.AbstractStateChangeTouchController;
 import com.android.launcher3.touch.SingleAxisSwipeDetector;
 import com.android.launcher3.uioverrides.states.OverviewState;
@@ -49,6 +53,7 @@ import com.android.launcher3.userevent.nano.LauncherLogProto.ContainerType;
 import com.android.quickstep.SystemUiProxy;
 import com.android.quickstep.TouchInteractionService;
 import com.android.quickstep.util.LayoutUtils;
+import com.android.quickstep.views.RecentsView;
 
 /**
  * Touch controller for handling various state transitions in portrait UI.
@@ -127,13 +132,33 @@ public class PortraitStatesTouchController extends AbstractStateChangeTouchContr
 
     @Override
     protected LauncherState getTargetState(LauncherState fromState, boolean isDragTowardPositive) {
+        if (TestProtocol.sDebugTracing) {
+            Log.d(TestProtocol.OVERIEW_NOT_ALLAPPS, "PortraitStatesTouchController.getTargetState");
+        }
         if (fromState == ALL_APPS && !isDragTowardPositive) {
             // Should swipe down go to OVERVIEW instead?
+            if (TestProtocol.sDebugTracing) {
+                Log.d(TestProtocol.OVERIEW_NOT_ALLAPPS,
+                        "PortraitStatesTouchController.getTargetState 1");
+            }
             return TouchInteractionService.isConnected() ?
                     mLauncher.getStateManager().getLastState() : NORMAL;
         } else if (fromState == OVERVIEW) {
-            return isDragTowardPositive ? ALL_APPS : NORMAL;
+            if (TestProtocol.sDebugTracing) {
+                Log.d(TestProtocol.OVERIEW_NOT_ALLAPPS,
+                        "PortraitStatesTouchController.getTargetState 2");
+            }
+            LauncherState positiveDragTarget = ALL_APPS;
+            if (ENABLE_OVERVIEW_ACTIONS.get() && removeShelfFromOverview(mLauncher)) {
+                // Don't allow swiping up to all apps.
+                positiveDragTarget = OVERVIEW;
+            }
+            return isDragTowardPositive ? positiveDragTarget : NORMAL;
         } else if (fromState == NORMAL && isDragTowardPositive) {
+            if (TestProtocol.sDebugTracing) {
+                Log.d(TestProtocol.OVERIEW_NOT_ALLAPPS,
+                        "PortraitStatesTouchController.getTargetState 3");
+            }
             int stateFlags = SystemUiProxy.INSTANCE.get(mLauncher).getLastSystemUiStateFlags();
             return mAllowDragToOverview && TouchInteractionService.isConnected()
                     && (stateFlags & SYSUI_STATE_OVERVIEW_DISABLED) == 0
@@ -237,8 +262,9 @@ public class PortraitStatesTouchController extends AbstractStateChangeTouchContr
             mCurrentAnimation = mPendingAnimation.createPlaybackController()
                     .setOnCancelRunnable(onCancelRunnable);
             mLauncher.getStateManager().setCurrentUserControlledAnimation(mCurrentAnimation);
+            RecentsView recentsView = mLauncher.getOverviewPanel();
             totalShift = LayoutUtils.getShelfTrackingDistance(mLauncher,
-                    mLauncher.getDeviceProfile());
+                    mLauncher.getDeviceProfile(), recentsView.getPagedOrientationHandler());
         } else {
             mCurrentAnimation = mLauncher.getStateManager()
                     .createAnimationToNewWorkspace(mToState, config)

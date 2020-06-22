@@ -16,7 +16,7 @@
 
 package com.android.launcher3;
 
-import static com.android.launcher3.logging.StatsLogManager.LauncherEvent.APP_LAUNCH_TAP;
+import static com.android.launcher3.logging.StatsLogManager.LauncherEvent.LAUNCHER_APP_LAUNCH_TAP;
 import static com.android.launcher3.util.DefaultDisplay.CHANGE_ROTATION;
 
 import android.app.ActivityOptions;
@@ -24,6 +24,8 @@ import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.pm.LauncherApps;
 import android.content.res.Configuration;
+import android.graphics.Insets;
+import android.graphics.Point;
 import android.graphics.Rect;
 import android.os.Bundle;
 import android.os.Process;
@@ -31,16 +33,19 @@ import android.os.StrictMode;
 import android.os.UserHandle;
 import android.util.Log;
 import android.view.ActionMode;
+import android.view.Display;
 import android.view.View;
 import android.view.View.OnClickListener;
+import android.view.WindowInsets.Type;
+import android.view.WindowMetrics;
 import android.widget.Toast;
 
 import androidx.annotation.Nullable;
 
 import com.android.launcher3.LauncherSettings.Favorites;
 import com.android.launcher3.model.AppLaunchTracker;
-import com.android.launcher3.testing.TestLogging;
-import com.android.launcher3.testing.TestProtocol;
+import com.android.launcher3.model.data.ItemInfo;
+import com.android.launcher3.model.data.WorkspaceItemInfo;
 import com.android.launcher3.touch.ItemClickHandler;
 import com.android.launcher3.uioverrides.WallpaperColorInfo;
 import com.android.launcher3.util.DefaultDisplay;
@@ -49,6 +54,7 @@ import com.android.launcher3.util.DefaultDisplay.Info;
 import com.android.launcher3.util.PackageManagerHelper;
 import com.android.launcher3.util.Themes;
 import com.android.launcher3.util.TraceHelper;
+import com.android.launcher3.util.WindowBounds;
 
 /**
  * Extension of BaseActivity allowing support for drag-n-drop
@@ -171,7 +177,6 @@ public abstract class BaseDraggingActivity extends BaseActivity
                 startShortcutIntentSafely(intent, optsBundle, item, sourceContainer);
             } else if (user == null || user.equals(Process.myUserHandle())) {
                 // Could be launching some bookkeeping activity
-                TestLogging.recordEvent(TestProtocol.SEQUENCE_MAIN, "start: activity", intent);
                 startActivity(intent, optsBundle);
                 AppLaunchTracker.INSTANCE.get(this).onStartApp(intent.getComponent(),
                         Process.myUserHandle(), sourceContainer);
@@ -182,7 +187,8 @@ public abstract class BaseDraggingActivity extends BaseActivity
                         sourceContainer);
             }
             getUserEventDispatcher().logAppLaunch(v, intent, user);
-            getStatsLogManager().log(APP_LAUNCH_TAP, item.buildProto(null, null));
+            getStatsLogManager().log(LAUNCHER_APP_LAUNCH_TAP, item == null ? null
+                    : item.buildProto());
             return true;
         } catch (NullPointerException|ActivityNotFoundException|SecurityException e) {
             Toast.makeText(this, R.string.activity_not_found, Toast.LENGTH_SHORT).show();
@@ -269,4 +275,20 @@ public abstract class BaseDraggingActivity extends BaseActivity
     }
 
     protected abstract void reapplyUi();
+
+    protected WindowBounds getMultiWindowDisplaySize() {
+        if (Utilities.ATLEAST_R) {
+            WindowMetrics wm = getWindowManager().getCurrentWindowMetrics();
+
+            Insets insets = wm.getWindowInsets().getInsets(Type.systemBars());
+            return new WindowBounds(wm.getBounds(),
+                    new Rect(insets.left, insets.top, insets.right, insets.bottom));
+        }
+        // Note: Calls to getSize() can't rely on our cached DefaultDisplay since it can return
+        // the app window size
+        Display display = getWindowManager().getDefaultDisplay();
+        Point mwSize = new Point();
+        display.getSize(mwSize);
+        return new WindowBounds(new Rect(0, 0, mwSize.x, mwSize.y), new Rect());
+    }
 }

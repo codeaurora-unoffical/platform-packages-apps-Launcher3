@@ -17,18 +17,19 @@
 package com.android.launcher3.model;
 
 import static com.android.launcher3.model.ModelUtils.filterCurrentWorkspaceItems;
+import static com.android.launcher3.model.ModelUtils.getMissingHotseatRanks;
 import static com.android.launcher3.model.ModelUtils.sortWorkspaceItemsSpatially;
 
 import android.util.Log;
 
-import com.android.launcher3.AppInfo;
 import com.android.launcher3.InvariantDeviceProfile;
-import com.android.launcher3.ItemInfo;
 import com.android.launcher3.LauncherAppState;
-import com.android.launcher3.LauncherAppWidgetInfo;
 import com.android.launcher3.LauncherModel.CallbackTask;
 import com.android.launcher3.PagedView;
 import com.android.launcher3.model.BgDataModel.Callbacks;
+import com.android.launcher3.model.data.AppInfo;
+import com.android.launcher3.model.data.ItemInfo;
+import com.android.launcher3.model.data.LauncherAppWidgetInfo;
 import com.android.launcher3.util.IntArray;
 import com.android.launcher3.util.LooperExecutor;
 import com.android.launcher3.util.LooperIdleLock;
@@ -196,6 +197,10 @@ public abstract class BaseLoaderResults {
             // Load items on the current page.
             bindWorkspaceItems(currentWorkspaceItems, mainExecutor);
             bindAppWidgets(currentAppWidgets, mainExecutor);
+
+            // Locate available spots for prediction using currentWorkspaceItems
+            IntArray gaps = getMissingHotseatRanks(currentWorkspaceItems, idp.numHotseatIcons);
+            bindPredictedItems(gaps, mainExecutor);
             // In case of validFirstPage, only bind the first screen, and defer binding the
             // remaining screens after first onDraw (and an optional the fade animation whichever
             // happens later).
@@ -245,6 +250,11 @@ public abstract class BaseLoaderResults {
                 executeCallbacksTask(
                         c -> c.bindItems(Collections.singletonList(widget), false), executor);
             }
+        }
+
+        private void bindPredictedItems(IntArray ranks, final Executor executor) {
+            ArrayList<AppInfo> items = new ArrayList<>(mBgDataModel.cachedPredictedItems);
+            executeCallbacksTask(c -> c.bindPredictedItems(items, ranks), executor);
         }
 
         protected void executeCallbacksTask(CallbackTask task, Executor executor) {

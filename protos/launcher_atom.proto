@@ -23,9 +23,10 @@ option java_outer_classname = "LauncherAtom";
 message ItemInfo {
   oneof Item {
     Application application = 1;
-    Task task= 2;
+    Task task = 2;
     Shortcut shortcut = 3;
     Widget widget = 4;
+    FolderIcon folder_icon = 9;
   }
   // When used for launch event, stores the global predictive rank
   optional int32 rank = 5;
@@ -34,13 +35,44 @@ message ItemInfo {
   optional bool is_work = 6;
 
   // Item can be child node to parent container or parent containers (nested)
-  oneof Container {
-    WorkspaceContainer workspace = 7;
-    HotseatContainer hotseat = 8;
-    FolderContainer folder = 9;
-  }
+  optional ContainerInfo container_info = 7;
+
   // Stores the origin of the Item
-  optional Origin source = 10;
+  optional Origin source = 8;
+}
+
+// Represents various launcher surface where items are placed.
+message ContainerInfo {
+  oneof Container {
+    WorkspaceContainer workspace = 1;
+    HotseatContainer hotseat = 2;
+    FolderContainer folder = 3;
+    AllAppsContainer all_apps_container = 4;
+    WidgetsContainer widgets_container = 5;
+    PredictionContainer prediction_container = 6;
+    SearchResultContainer search_result_container = 7;
+    ShortcutsContainer shortcuts_container = 8;
+  }
+}
+
+// Represents the apps list sorted alphabetically inside the all-apps view.
+message AllAppsContainer {
+}
+
+message WidgetsContainer {
+}
+
+// Represents the predicted apps row(top row) in the all-apps view.
+message PredictionContainer {
+}
+
+// Represents the apps container within search results.
+message SearchResultContainer {
+}
+
+// Container for package specific shortcuts to deep links and notifications.
+// Typically shown as popup window by longpressing on an icon.
+message ShortcutsContainer {
 }
 
 enum Origin {
@@ -68,8 +100,8 @@ message Shortcut {
 
 // AppWidgets handled by AppWidgetManager
 message Widget {
-  optional int32 span_x = 1;
-  optional int32 span_y = 2;
+  optional int32 span_x = 1 [default = 1];
+  optional int32 span_y = 2 [default = 1];
   optional int32 app_widget_id = 3;
   optional string package_name = 4; // only populated during snapshot if from workspace
   optional string component_name = 5; // only populated during snapshot if from workspace
@@ -82,13 +114,29 @@ message Task {
   optional int32 index = 3;
 }
 
+// Represents folder in a closed state.
+message FolderIcon {
+  // Number of items inside folder.
+  optional int32 cardinality = 1;
+
+  // State of the folder label before the event.
+  optional FromState from_label_state = 2;
+
+  // State of the folder label after the event.
+  optional ToState to_label_state = 3;
+
+  // Details about actual folder label.
+  // Populated when folder label is not a PII.
+  optional string label_info = 4;
+}
+
 //////////////////////////////////////////////
 // Containers
 
 message WorkspaceContainer {
-  optional int32 page_index = 1; // range [-1, l], 0 is the index of the main homescreen
-  optional int32 grid_x = 2;     // [0, m], m varies based on the display density and resolution
-  optional int32 grid_y = 3;     // [0, n], n varies based on the display density and resolution
+  optional int32 page_index = 1 [default = -2]; // range [-1, l], 0 is the index of the main homescreen
+  optional int32 grid_x = 2 [default = -1]; // [0, m], m varies based on the display density and resolution
+  optional int32 grid_y = 3 [default = -1]; // [0, n], n varies based on the display density and resolution
 }
 
 message HotseatContainer {
@@ -96,13 +144,86 @@ message HotseatContainer {
 }
 
 message FolderContainer {
-  optional int32 page_index = 1;
-  optional int32 grid_x = 2;
-  optional int32 grid_y = 3;
-  oneof Container {
+  optional int32 page_index = 1 [default = -1];
+  optional int32 grid_x = 2 [default = -1];
+  optional int32 grid_y = 3 [default = -1];
+  oneof ParentContainer {
     WorkspaceContainer workspace = 4;
     HotseatContainer hotseat = 5;
   }
 }
 
+// Represents state of EditText field before update.
+enum FromState {
+  // Default value.
+  // Used when a FromState is not applicable, for example, during folder creation.
+  FROM_STATE_UNSPECIFIED = 0;
 
+  // EditText was empty.
+  // Eg: When a folder label is updated from empty string.
+  FROM_EMPTY = 1;
+
+  // EditText was non-empty and manually entered by the user.
+  // Eg: When a folder label is updated from a user-entered value.
+  FROM_CUSTOM = 2;
+
+  // EditText was non-empty and one of the suggestions.
+  // Eg: When a folder label is updated from a suggested value.
+  FROM_SUGGESTED = 3;
+}
+
+// Represents state of EditText field after update.
+enum ToState {
+  // Default value.
+  // Used when ToState is not applicable, for example, when folder label is updated to a different
+  // value when folder label suggestion feature is disabled.
+  TO_STATE_UNSPECIFIED = 0;
+
+  // User attempted to change the EditText, but was not changed.
+  UNCHANGED = 1;
+
+  // New label matches with primary(aka top) suggestion.
+  TO_SUGGESTION0 = 2;
+
+  // New value matches with second top suggestion even though the top suggestion was non-empty.
+  TO_SUGGESTION1_WITH_VALID_PRIMARY = 3;
+
+  // New value matches with second top suggestion given that top suggestion was empty.
+  TO_SUGGESTION1_WITH_EMPTY_PRIMARY = 4;
+
+  // New value matches with third top suggestion even though the top suggestion was non-empty.
+  TO_SUGGESTION2_WITH_VALID_PRIMARY = 5;
+
+  // New value matches with third top suggestion given that top suggestion was empty.
+  TO_SUGGESTION2_WITH_EMPTY_PRIMARY = 6;
+
+  // New value matches with 4th top suggestion even though the top suggestion was non-empty.
+  TO_SUGGESTION3_WITH_VALID_PRIMARY = 7;
+
+  // New value matches with 4th top suggestion given that top suggestion was empty.
+  TO_SUGGESTION3_WITH_EMPTY_PRIMARY = 8;
+
+  // New value is empty even though the top suggestion was non-empty.
+  TO_EMPTY_WITH_VALID_PRIMARY = 9;
+
+  // New value is empty given that top suggestion was empty.
+  TO_EMPTY_WITH_VALID_SUGGESTIONS_AND_EMPTY_PRIMARY = 10;
+
+  // New value is empty given that no suggestions were provided.
+  TO_EMPTY_WITH_EMPTY_SUGGESTIONS = 11;
+
+  // New value is empty given that suggestions feature was disabled.
+  TO_EMPTY_WITH_SUGGESTIONS_DISABLED = 12;
+
+  // New value is non-empty and does not match with any of the suggestions even though the top suggestion was non-empty.
+  TO_CUSTOM_WITH_VALID_PRIMARY = 13;
+
+  // New value is non-empty and not match with any suggestions given that top suggestion was empty.
+  TO_CUSTOM_WITH_VALID_SUGGESTIONS_AND_EMPTY_PRIMARY = 14;
+
+  // New value is non-empty and also no suggestions were provided.
+  TO_CUSTOM_WITH_EMPTY_SUGGESTIONS = 15;
+
+  // New value is non-empty and also suggestions feature was disable.
+  TO_CUSTOM_WITH_SUGGESTIONS_DISABLED = 16;
+}

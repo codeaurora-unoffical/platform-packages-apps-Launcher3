@@ -1,5 +1,6 @@
 package com.android.launcher3;
 
+import static com.android.launcher3.config.FeatureFlags.SEPARATE_RECENTS_ACTIVITY;
 import static com.android.launcher3.util.SystemUiController.FLAG_DARK_NAV;
 import static com.android.launcher3.util.SystemUiController.UI_STATE_ROOT_VIEW;
 
@@ -64,15 +65,8 @@ public class LauncherRootView extends InsettableFrameLayout {
     private void handleSystemWindowInsets(Rect insets) {
         mConsumedInsets.setEmpty();
         boolean drawInsetBar = false;
-        if (mLauncher.isInMultiWindowMode()
-                && (insets.left > 0 || insets.right > 0 || insets.bottom > 0)) {
-            mConsumedInsets.left = insets.left;
-            mConsumedInsets.right = insets.right;
-            mConsumedInsets.bottom = insets.bottom;
-            insets.set(0, insets.top, 0, 0);
-            drawInsetBar = true;
-        } else  if ((insets.right > 0 || insets.left > 0) &&
-                getContext().getSystemService(ActivityManager.class).isLowRamDevice()) {
+        if ((insets.right > 0 || insets.left > 0)
+                && getContext().getSystemService(ActivityManager.class).isLowRamDevice()) {
             mConsumedInsets.left = insets.left;
             mConsumedInsets.right = insets.right;
             insets.set(0, insets.top, 0, insets.bottom);
@@ -184,7 +178,7 @@ public class LauncherRootView extends InsettableFrameLayout {
 
     @TargetApi(Build.VERSION_CODES.Q)
     public void setDisallowBackGesture(boolean disallowBackGesture) {
-        if (!Utilities.ATLEAST_Q) {
+        if (!Utilities.ATLEAST_Q || SEPARATE_RECENTS_ACTIVITY.get()) {
             return;
         }
         mDisallowBackGesture = disallowBackGesture;
