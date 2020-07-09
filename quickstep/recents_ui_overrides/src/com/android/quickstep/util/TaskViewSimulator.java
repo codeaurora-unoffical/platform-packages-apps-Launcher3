@@ -22,7 +22,9 @@ import static com.android.systemui.shared.system.WindowManagerWrapper.WINDOWING_
 
 import android.animation.TimeInterpolator;
 import android.content.Context;
+import android.content.res.Configuration;
 import android.graphics.Matrix;
+import android.graphics.Point;
 import android.graphics.PointF;
 import android.graphics.Rect;
 import android.graphics.RectF;
@@ -74,7 +76,7 @@ public class TaskViewSimulator implements TransformParams.BuilderProxy {
     private DeviceProfile mDp;
 
     private final Matrix mMatrix = new Matrix();
-    private RemoteAnimationTargetCompat mRunningTarget;
+    private final Point mRunningTargetWindowPosition = new Point();
 
     // Thumbnail view properties
     private final Rect mThumbnailPosition = new Rect();
@@ -124,6 +126,14 @@ public class TaskViewSimulator implements TransformParams.BuilderProxy {
     }
 
     /**
+     * @see com.android.quickstep.views.RecentsView#onConfigurationChanged(Configuration)
+     */
+    public void setRecentsConfiguration(Configuration configuration) {
+        mOrientationState.setActivityConfiguration(configuration);
+        mLayoutValid = false;
+    }
+
+    /**
      * @see com.android.quickstep.views.RecentsView#FULLSCREEN_PROGRESS
      */
     public float getFullScreenScale() {
@@ -139,13 +149,20 @@ public class TaskViewSimulator implements TransformParams.BuilderProxy {
      * Sets the targets which the simulator will control
      */
     public void setPreview(RemoteAnimationTargetCompat runningTarget) {
-        mRunningTarget = runningTarget;
+        setPreviewBounds(runningTarget.screenSpaceBounds, runningTarget.contentInsets);
+        mRunningTargetWindowPosition.set(runningTarget.screenSpaceBounds.left,
+                runningTarget.screenSpaceBounds.top);
+    }
 
-        mThumbnailData.insets.set(mRunningTarget.contentInsets);
+    /**
+     * Sets the targets which the simulator will control
+     */
+    public void setPreviewBounds(Rect bounds, Rect insets) {
+        mThumbnailData.insets.set(insets);
         // TODO: What is this?
         mThumbnailData.windowingMode = WINDOWING_MODE_FULLSCREEN;
 
-        mThumbnailPosition.set(runningTarget.screenSpaceBounds);
+        mThumbnailPosition.set(bounds);
         mLayoutValid = false;
     }
 
@@ -197,18 +214,17 @@ public class TaskViewSimulator implements TransformParams.BuilderProxy {
     public void applyWindowToHomeRotation(Matrix matrix) {
         mMatrix.postTranslate(mDp.windowX, mDp.windowY);
         postDisplayRotation(deltaRotation(
-                mOrientationState.getLauncherRotation(), mOrientationState.getDisplayRotation()),
+                mOrientationState.getRecentsActivityRotation(),
+                mOrientationState.getDisplayRotation()),
                 mDp.widthPx, mDp.heightPx, matrix);
-        if (mRunningTarget != null) {
-            matrix.postTranslate(-mRunningTarget.position.x, -mRunningTarget.position.y);
-        }
+        matrix.postTranslate(-mRunningTargetWindowPosition.x, -mRunningTargetWindowPosition.y);
     }
 
     /**
      * Applies the target to the previously set parameters
      */
     public void apply(TransformParams params) {
-        if (mDp == null || mRunningTarget == null) {
+        if (mDp == null || mThumbnailPosition.isEmpty()) {
             return;
         }
         if (!mLayoutValid) {
@@ -220,7 +236,7 @@ public class TaskViewSimulator implements TransformParams.BuilderProxy {
             mPositionHelper.updateThumbnailMatrix(
                     mThumbnailPosition, mThumbnailData,
                     mTaskRect.width(), mTaskRect.height(),
-                    mDp, mOrientationState.getLauncherRotation());
+                    mDp, mOrientationState.getRecentsActivityRotation());
             mPositionHelper.getMatrix().invert(mInversePositionMatrix);
 
             PagedOrientationHandler poh = mOrientationState.getOrientationHandler();
@@ -250,12 +266,12 @@ public class TaskViewSimulator implements TransformParams.BuilderProxy {
         float taskHeight = mTaskRect.height();
 
         mMatrix.set(mPositionHelper.getMatrix());
-        mMatrix.postScale(scale, scale);
         mMatrix.postTranslate(insets.left, insets.top);
+        mMatrix.postScale(scale, scale);
 
-        // Apply TaskView matrix: scale, translate, scroll
-        mMatrix.postScale(mCurveScale, mCurveScale, taskWidth / 2, taskHeight / 2);
+        // Apply TaskView matrix: translate, scale, scroll
         mMatrix.postTranslate(mTaskRect.left, mTaskRect.top);
+        mMatrix.postScale(mCurveScale, mCurveScale, taskWidth / 2, taskHeight / 2);
         mOrientationState.getOrientationHandler().set(
                 mMatrix, MATRIX_POST_TRANSLATE, mScrollState.scroll);
 

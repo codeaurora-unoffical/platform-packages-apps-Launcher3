@@ -23,6 +23,8 @@ import static android.view.MotionEvent.ACTION_POINTER_UP;
 import static android.view.MotionEvent.ACTION_UP;
 import static android.view.MotionEvent.INVALID_POINTER_ID;
 
+import static com.android.launcher3.PagedView.ACTION_MOVE_ALLOW_EASY_FLING;
+import static com.android.launcher3.PagedView.DEBUG_FAILED_QUICKSWITCH;
 import static com.android.launcher3.Utilities.EDGE_NAV_BAR;
 import static com.android.launcher3.Utilities.squaredHypot;
 import static com.android.launcher3.util.TraceHelper.FLAG_CHECK_FOR_RACE_CONDITIONS;
@@ -38,6 +40,7 @@ import android.graphics.PointF;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.view.MotionEvent;
 import android.view.VelocityTracker;
 import android.view.ViewConfiguration;
@@ -76,7 +79,8 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
     private static final String UP_EVT = "OtherActivityInputConsumer.UP";
 
     // TODO: Move to quickstep contract
-    public static final float QUICKSTEP_TOUCH_SLOP_RATIO = 3;
+    public static final float QUICKSTEP_TOUCH_SLOP_RATIO_TWO_BUTTON = 9;
+    public static final float QUICKSTEP_TOUCH_SLOP_RATIO_GESTURAL = 2;
 
     private final RecentsAnimationDeviceState mDeviceState;
     private final NavBarPosition mNavBarPosition;
@@ -150,10 +154,12 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
 
         boolean continuingPreviousGesture = mTaskAnimationManager.isRecentsAnimationRunning();
         mIsDeferredDownTarget = !continuingPreviousGesture && isDeferredDownTarget;
-        mTouchSlop = ViewConfiguration.get(this).getScaledTouchSlop();
 
-        float slop = QUICKSTEP_TOUCH_SLOP_RATIO * mTouchSlop;
-        mSquaredTouchSlop = slop * slop;
+        float slopMultiplier = mDeviceState.isFullyGesturalNavMode()
+                ? QUICKSTEP_TOUCH_SLOP_RATIO_GESTURAL
+                : QUICKSTEP_TOUCH_SLOP_RATIO_TWO_BUTTON;
+        mTouchSlop = ViewConfiguration.get(this).getScaledTouchSlop();
+        mSquaredTouchSlop = slopMultiplier * mTouchSlop * mTouchSlop;
 
         mPassedPilferInputSlop = mPassedWindowMoveSlop = continuingPreviousGesture;
         mDisableHorizontalSwipe = !mPassedPilferInputSlop && disableHorizontalSwipe;
@@ -187,6 +193,10 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
                 && !mRecentsViewDispatcher.hasConsumer()) {
             mRecentsViewDispatcher.setConsumer(mInteractionHandler
                     .getRecentsViewDispatcher(mNavBarPosition.getRotation()));
+            int action = ev.getAction();
+            ev.setAction(ACTION_MOVE_ALLOW_EASY_FLING);
+            mRecentsViewDispatcher.dispatchEvent(ev);
+            ev.setAction(action);
         }
         int edgeFlags = ev.getEdgeFlags();
         ev.setEdgeFlags(edgeFlags | EDGE_NAV_BAR);
@@ -267,9 +277,12 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
                 if (!mPassedSlopOnThisGesture && passedSlop) {
                     mPassedSlopOnThisGesture = true;
                 }
-                // Until passing slop, we don't know what direction we're going, so assume we might
-                // be quick switching to avoid translating recents away when continuing the gesture.
-                boolean isLikelyToStartNewTask = !mPassedSlopOnThisGesture
+                // Until passing slop, we don't know what direction we're going, so assume
+                // we're quick switching to avoid translating recents away when continuing
+                // the gesture (in which case mPassedPilferInputSlop starts as true).
+                boolean haveNotPassedSlopOnContinuedGesture =
+                        !mPassedSlopOnThisGesture && mPassedPilferInputSlop;
+                boolean isLikelyToStartNewTask = haveNotPassedSlopOnContinuedGesture
                         || horizontalDist > upDist;
 
                 if (!mPassedPilferInputSlop) {
@@ -293,7 +306,7 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
                             mStartDisplacement = Math.min(displacement, -mTouchSlop);
 
                         }
-                        notifyGestureStarted();
+                        notifyGestureStarted(isLikelyToStartNewTask);
                     }
                 }
 
@@ -314,13 +327,20 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
             }
             case ACTION_CANCEL:
             case ACTION_UP: {
+                if (DEBUG_FAILED_QUICKSWITCH && !mPassedWindowMoveSlop) {
+                    float displacementX = mLastPos.x - mDownPos.x;
+                    float displacementY = mLastPos.y - mDownPos.y;
+                    Log.d("Quickswitch", "mPassedWindowMoveSlop=false"
+                            + " disp=" + squaredHypot(displacementX, displacementY)
+                            + " slop=" + mSquaredTouchSlop);
+                }
                 finishTouchTracking(ev);
                 break;
             }
         }
     }
 
-    private void notifyGestureStarted() {
+    private void notifyGestureStarted(boolean isLikelyToStartNewTask) {
         ActiveGestureLog.INSTANCE.addLog("startQuickstep");
         if (mInteractionHandler == null) {
             return;
@@ -333,7 +353,7 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
                 CLOSE_SYSTEM_WINDOWS_REASON_RECENTS);
 
         // Notify the handler that the gesture has actually started
-        mInteractionHandler.onGestureStarted();
+        mInteractionHandler.onGestureStarted(isLikelyToStartNewTask);
     }
 
     private void startTouchTrackingForWindowAnimation(long touchTimeMs) {
@@ -350,8 +370,7 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
             mActiveCallbacks = mTaskAnimationManager.continueRecentsAnimation(mGestureState);
             mActiveCallbacks.addListener(mInteractionHandler);
             mTaskAnimationManager.notifyRecentsAnimationState(mInteractionHandler);
-            mInteractionHandler.setIsLikelyToStartNewTask(true);
-            notifyGestureStarted();
+            notifyGestureStarted(true /*isLikelyToStartNewTask*/);
         } else {
             intent.putExtra(INTENT_EXTRA_LOG_TRACE_ID, mGestureState.getGestureId());
             mActiveCallbacks = mTaskAnimationManager.startRecentsAnimation(mGestureState, intent,
@@ -401,6 +420,11 @@ public class OtherActivityInputConsumer extends ContextWrapper implements InputC
         mVelocityTracker = null;
         mMotionPauseDetector.clear();
         TraceHelper.INSTANCE.endSection(traceToken);
+    }
+
+    @Override
+    public void notifyOrientationSetup() {
+        mDeviceState.onStartGesture();
     }
 
     @Override

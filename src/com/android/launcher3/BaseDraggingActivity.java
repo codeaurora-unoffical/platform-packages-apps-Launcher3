@@ -24,6 +24,7 @@ import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.pm.LauncherApps;
 import android.content.res.Configuration;
+import android.graphics.Insets;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.os.Bundle;
@@ -35,11 +36,15 @@ import android.view.ActionMode;
 import android.view.Display;
 import android.view.View;
 import android.view.View.OnClickListener;
+import android.view.WindowInsets.Type;
+import android.view.WindowMetrics;
 import android.widget.Toast;
 
 import androidx.annotation.Nullable;
 
 import com.android.launcher3.LauncherSettings.Favorites;
+import com.android.launcher3.logging.InstanceId;
+import com.android.launcher3.logging.InstanceIdSequence;
 import com.android.launcher3.model.AppLaunchTracker;
 import com.android.launcher3.model.data.ItemInfo;
 import com.android.launcher3.model.data.WorkspaceItemInfo;
@@ -51,6 +56,7 @@ import com.android.launcher3.util.DefaultDisplay.Info;
 import com.android.launcher3.util.PackageManagerHelper;
 import com.android.launcher3.util.Themes;
 import com.android.launcher3.util.TraceHelper;
+import com.android.launcher3.util.WindowBounds;
 
 /**
  * Extension of BaseActivity allowing support for drag-n-drop
@@ -183,14 +189,21 @@ public abstract class BaseDraggingActivity extends BaseActivity
                         sourceContainer);
             }
             getUserEventDispatcher().logAppLaunch(v, intent, user);
-            getStatsLogManager().log(LAUNCHER_APP_LAUNCH_TAP, item == null ? null
-                    : item.buildProto());
+            if (item != null) {
+                InstanceId instanceId = new InstanceIdSequence().newInstanceId();
+                logAppLaunch(item, instanceId);
+            }
             return true;
         } catch (NullPointerException|ActivityNotFoundException|SecurityException e) {
             Toast.makeText(this, R.string.activity_not_found, Toast.LENGTH_SHORT).show();
             Log.e(TAG, "Unable to launch. tag=" + item + " intent=" + intent, e);
         }
         return false;
+    }
+
+    protected void logAppLaunch(ItemInfo info, InstanceId instanceId) {
+        getStatsLogManager().logger().withItemInfo(info).withInstanceId(instanceId)
+                .log(LAUNCHER_APP_LAUNCH_TAP);
     }
 
     private void startShortcutIntentSafely(Intent intent, Bundle optsBundle, ItemInfo info,
@@ -272,15 +285,19 @@ public abstract class BaseDraggingActivity extends BaseActivity
 
     protected abstract void reapplyUi();
 
-    protected Rect getMultiWindowDisplaySize() {
+    protected WindowBounds getMultiWindowDisplaySize() {
         if (Utilities.ATLEAST_R) {
-            return new Rect(getWindowManager().getCurrentWindowMetrics().getBounds());
+            WindowMetrics wm = getWindowManager().getCurrentWindowMetrics();
+
+            Insets insets = wm.getWindowInsets().getInsets(Type.systemBars());
+            return new WindowBounds(wm.getBounds(),
+                    new Rect(insets.left, insets.top, insets.right, insets.bottom));
         }
         // Note: Calls to getSize() can't rely on our cached DefaultDisplay since it can return
         // the app window size
         Display display = getWindowManager().getDefaultDisplay();
         Point mwSize = new Point();
         display.getSize(mwSize);
-        return new Rect(0, 0, mwSize.x, mwSize.y);
+        return new WindowBounds(new Rect(0, 0, mwSize.x, mwSize.y), new Rect());
     }
 }

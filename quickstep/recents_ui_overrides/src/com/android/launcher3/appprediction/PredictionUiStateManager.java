@@ -16,6 +16,9 @@
 
 package com.android.launcher3.appprediction;
 
+import static com.android.launcher3.LauncherSettings.Favorites.ITEM_TYPE_APPLICATION;
+import static com.android.launcher3.LauncherSettings.Favorites.ITEM_TYPE_DEEP_SHORTCUT;
+import static com.android.launcher3.LauncherSettings.Favorites.ITEM_TYPE_SHORTCUT;
 import static com.android.launcher3.LauncherState.BACKGROUND_APP;
 import static com.android.launcher3.LauncherState.OVERVIEW;
 
@@ -25,6 +28,7 @@ import android.content.ComponentName;
 import android.content.Context;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import com.android.launcher3.InvariantDeviceProfile;
 import com.android.launcher3.InvariantDeviceProfile.OnIDPChangeListener;
@@ -48,6 +52,7 @@ import com.android.launcher3.util.MainThreadInitializedObject;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.OptionalInt;
 import java.util.stream.IntStream;
 
 /**
@@ -302,6 +307,32 @@ public class PredictionUiStateManager implements StateListener<LauncherState>,
     }
 
     /**
+     * Returns ranking info for the app within all apps prediction.
+     * Only applicable when {@link ItemInfo#itemType} is one of the followings:
+     * {@link LauncherSettings.Favorites#ITEM_TYPE_APPLICATION},
+     * {@link LauncherSettings.Favorites#ITEM_TYPE_SHORTCUT},
+     * {@link LauncherSettings.Favorites#ITEM_TYPE_DEEP_SHORTCUT}
+     */
+    public OptionalInt getAllAppsRank(@Nullable ItemInfo itemInfo) {
+        if (itemInfo == null || itemInfo.getTargetComponent() == null || itemInfo.user == null) {
+            return OptionalInt.empty();
+        }
+
+        if (itemInfo.itemType == ITEM_TYPE_APPLICATION
+                || itemInfo.itemType == ITEM_TYPE_SHORTCUT
+                || itemInfo.itemType == ITEM_TYPE_DEEP_SHORTCUT) {
+            ComponentKey key = new ComponentKey(itemInfo.getTargetComponent(),
+                    itemInfo.user);
+            final List<ComponentKeyMapper> apps = getCurrentState().apps;
+            return IntStream.range(0, apps.size())
+                    .filter(index -> key.equals(apps.get(index).getComponentKey()))
+                    .findFirst();
+        }
+
+        return OptionalInt.empty();
+    }
+
+    /**
      * Fill in predicted_rank field based on app prediction.
      * Only applicable when {@link ItemInfo#itemType} is one of the followings:
      * {@link LauncherSettings.Favorites#ITEM_TYPE_APPLICATION},
@@ -310,6 +341,7 @@ public class PredictionUiStateManager implements StateListener<LauncherState>,
      */
     public static void fillInPredictedRank(
             @NonNull ItemInfo itemInfo, @NonNull LauncherLogProto.Target target) {
+
         final PredictionUiStateManager manager = PredictionUiStateManager.INSTANCE.getNoCreate();
         if (manager == null || itemInfo.getTargetComponent() == null || itemInfo.user == null
                 || (itemInfo.itemType != LauncherSettings.Favorites.ITEM_TYPE_APPLICATION

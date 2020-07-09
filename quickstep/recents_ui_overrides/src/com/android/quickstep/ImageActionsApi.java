@@ -17,6 +17,7 @@
 package com.android.quickstep;
 
 import static android.content.Intent.EXTRA_STREAM;
+import static android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION;
 
 import static com.android.launcher3.util.Executors.UI_HELPER_EXECUTOR;
 import static com.android.quickstep.util.ImageActionUtils.persistBitmapAndStartActivity;
@@ -33,6 +34,7 @@ import androidx.annotation.UiThread;
 
 import com.android.launcher3.BuildConfig;
 import com.android.quickstep.util.ImageActionUtils;
+import com.android.systemui.shared.recents.model.Task;
 
 import java.util.function.Supplier;
 
@@ -66,7 +68,9 @@ public class ImageActionsApi {
 
         UI_HELPER_EXECUTOR.execute(() -> persistBitmapAndStartActivity(mContext,
                 mBitmapSupplier.get(), crop, intent, (uri, intentForUri) -> {
-                    intentForUri.putExtra(EXTRA_STREAM, uri);
+                    intentForUri
+                            .addFlags(FLAG_GRANT_READ_URI_PERMISSION)
+                            .putExtra(EXTRA_STREAM, uri);
                     return new Intent[]{intentForUri};
                 }, TAG));
 
@@ -85,11 +89,11 @@ public class ImageActionsApi {
      * @param screenshotBounds the location of where the bitmap was laid out on the screen in
      *                         screen coordinates.
      * @param visibleInsets    that are used to draw the screenshot within the bounds.
-     * @param taskId           of the task that the screenshot was taken of.
+     * @param task             of the task that the screenshot was taken of.
      */
     public void saveScreenshot(Bitmap screenshot, Rect screenshotBounds,
-            Insets visibleInsets, int taskId) {
+            Insets visibleInsets, Task.TaskKey task) {
         ImageActionUtils.saveScreenshot(mSystemUiProxy, screenshot, screenshotBounds, visibleInsets,
-                taskId);
+                task);
     }
 }

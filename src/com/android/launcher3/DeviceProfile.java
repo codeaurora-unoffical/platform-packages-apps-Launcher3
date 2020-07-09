@@ -29,6 +29,7 @@ import com.android.launcher3.graphics.IconShape;
 import com.android.launcher3.icons.DotRenderer;
 import com.android.launcher3.icons.IconNormalizer;
 import com.android.launcher3.util.DefaultDisplay;
+import com.android.launcher3.util.WindowBounds;
 
 public class DeviceProfile {
 
@@ -265,19 +266,16 @@ public class DeviceProfile {
     /**
      * TODO: Move this to the builder as part of setMultiWindowMode
      */
-    public DeviceProfile getMultiWindowProfile(Context context, Rect windowPosition) {
+    public DeviceProfile getMultiWindowProfile(Context context, WindowBounds windowBounds) {
         // We take the minimum sizes of this profile and it's multi-window variant to ensure that
         // the system decor is always excluded.
-        Point mwSize = new Point(Math.min(availableWidthPx, windowPosition.width()),
-                Math.min(availableHeightPx, windowPosition.height()));
+        Point mwSize = new Point(Math.min(availableWidthPx, windowBounds.availableSize.x),
+                Math.min(availableHeightPx, windowBounds.availableSize.y));
 
-        // In multi-window mode, we can have widthPx = availableWidthPx
-        // and heightPx = availableHeightPx because Launcher uses the InvariantDeviceProfiles'
-        // widthPx and heightPx values where it's needed.
         DeviceProfile profile = toBuilder(context)
                 .setSizeRange(mwSize, mwSize)
-                .setSize(mwSize.x, mwSize.y)
-                .setWindowPosition(windowPosition.left, windowPosition.top)
+                .setSize(windowBounds.bounds.width(), windowBounds.bounds.height())
+                .setWindowPosition(windowBounds.bounds.left, windowBounds.bounds.top)
                 .setMultiWindowMode(true)
                 .build();
 
@@ -299,7 +297,7 @@ public class DeviceProfile {
     }
 
     /**
-     * Inverse of {@link #getMultiWindowProfile(Context, Rect)}
+     * Inverse of {@link #getMultiWindowProfile(Context, WindowBounds)}
      * @return device profile corresponding to the current orientation in non multi-window mode.
      */
     public DeviceProfile getFullScreenProfile() {
@@ -540,7 +538,6 @@ public class DeviceProfile {
                         mInsets.right + hotseatBarSidePaddingStartPx, mInsets.bottom);
             }
         } else {
-
             // We want the edges of the hotseat to line up with the edges of the workspace, but the
             // icons in the hotseat are a different size, and so don't line up perfectly. To account
             // for this, we pad the left and right of the hotseat with half of the difference of a
@@ -549,9 +546,11 @@ public class DeviceProfile {
             float hotseatCellWidth = (float) widthPx / inv.numHotseatIcons;
             int hotseatAdjustment = Math.round((workspaceCellWidth - hotseatCellWidth) / 2);
             mHotseatPadding.set(
-                    hotseatAdjustment + workspacePadding.left + cellLayoutPaddingLeftRightPx,
+                    hotseatAdjustment + workspacePadding.left + cellLayoutPaddingLeftRightPx
+                            + mInsets.left,
                     hotseatBarTopPaddingPx,
-                    hotseatAdjustment + workspacePadding.right + cellLayoutPaddingLeftRightPx,
+                    hotseatAdjustment + workspacePadding.right + cellLayoutPaddingLeftRightPx
+                            + mInsets.right,
                     hotseatBarBottomPaddingPx + mInsets.bottom + cellLayoutBottomPaddingPx);
         }
         return mHotseatPadding;

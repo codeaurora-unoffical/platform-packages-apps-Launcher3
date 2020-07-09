@@ -33,11 +33,11 @@ import com.android.launcher3.anim.PendingAnimation;
 import com.android.launcher3.statehandlers.DepthController;
 import com.android.launcher3.statemanager.StatefulActivity;
 import com.android.quickstep.util.RemoteAnimationProvider;
+import com.android.quickstep.util.SurfaceTransactionApplier;
 import com.android.quickstep.util.TaskViewSimulator;
 import com.android.quickstep.util.TransformParams;
 import com.android.quickstep.views.RecentsView;
 import com.android.systemui.shared.system.RemoteAnimationTargetCompat;
-import com.android.systemui.shared.system.SyncRtSurfaceTransactionApplierCompat;
 
 /**
  * Provider for the atomic (for 3-button mode) remote window animation from the app to the overview.
@@ -53,14 +53,17 @@ final class AppToOverviewAnimationProvider<T extends StatefulActivity<?>> extend
     private final BaseActivityInterface<?, T> mActivityInterface;
     // The id of the currently running task that is transitioning to overview.
     private final int mTargetTaskId;
+    private final RecentsAnimationDeviceState mDeviceState;
 
     private T mActivity;
     private RecentsView mRecentsView;
 
     AppToOverviewAnimationProvider(
-            BaseActivityInterface<?, T> activityInterface, int targetTaskId) {
+            BaseActivityInterface<?, T> activityInterface, int targetTaskId,
+            RecentsAnimationDeviceState deviceState) {
         mActivityInterface = activityInterface;
         mTargetTaskId = targetTaskId;
+        mDeviceState = deviceState;
     }
 
     /**
@@ -73,6 +76,7 @@ final class AppToOverviewAnimationProvider<T extends StatefulActivity<?>> extend
         activity.<RecentsView>getOverviewPanel().showCurrentTask(mTargetTaskId);
         AbstractFloatingView.closeAllOpenViews(activity, wasVisible);
         BaseActivityInterface.AnimationFactory factory = mActivityInterface.prepareRecentsUI(
+                mDeviceState,
                 wasVisible, (controller) -> {
                     controller.dispatchOnStart();
                     controller.getAnimationPlayer().end();
@@ -132,8 +136,7 @@ final class AppToOverviewAnimationProvider<T extends StatefulActivity<?>> extend
 
         TransformParams params = new TransformParams()
                 .setTargetSet(targets)
-                .setSyncTransactionApplier(
-                        new SyncRtSurfaceTransactionApplierCompat(mActivity.getRootView()));
+                .setSyncTransactionApplier(new SurfaceTransactionApplier(mActivity.getRootView()));
 
         AnimatedFloat recentsAlpha = new AnimatedFloat(() -> { });
         params.setBaseBuilderProxy((builder, app, p)

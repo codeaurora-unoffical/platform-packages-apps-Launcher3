@@ -148,6 +148,7 @@ public class InvariantDeviceProfile {
         iconSize = p.iconSize;
         iconShapePath = p.iconShapePath;
         landscapeIconSize = p.landscapeIconSize;
+        iconBitmapSize = p.iconBitmapSize;
         iconTextSize = p.iconTextSize;
         numHotseatIcons = p.numHotseatIcons;
         numAllAppsColumns = p.numAllAppsColumns;
@@ -200,7 +201,7 @@ public class InvariantDeviceProfile {
                 DefaultDisplay.INSTANCE.get(context).getInfo(),
                 getPredefinedDeviceProfiles(context, gridName));
 
-        Info myInfo = new Info(display);
+        Info myInfo = new Info(context, display);
         DisplayOption myDisplayOption = invDistWeightedInterpolate(
                 myInfo, getPredefinedDeviceProfiles(context, gridName));
 

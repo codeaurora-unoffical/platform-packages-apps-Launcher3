@@ -57,7 +57,7 @@ public class TransformParams {
     private float mTargetAlpha;
     private float mCornerRadius;
     private RemoteAnimationTargets mTargetSet;
-    private SyncRtSurfaceTransactionApplierCompat mSyncTransactionApplier;
+    private SurfaceTransactionApplier mSyncTransactionApplier;
 
     private BuilderProxy mHomeBuilderProxy = BuilderProxy.ALWAYS_VISIBLE;
     private BuilderProxy mBaseBuilderProxy = BuilderProxy.ALWAYS_VISIBLE;
@@ -112,7 +112,7 @@ public class TransformParams {
      * are computed based on these TransformParams.
      */
     public TransformParams setSyncTransactionApplier(
-            SyncRtSurfaceTransactionApplierCompat applier) {
+            SurfaceTransactionApplier applier) {
         mSyncTransactionApplier = applier;
         return this;
     }
@@ -191,7 +191,6 @@ public class TransformParams {
             for (SurfaceParams param : params) {
                 SyncRtSurfaceTransactionApplierCompat.applyParams(t, param);
             }
-            t.setEarlyWakeup();
             t.apply();
         }
     }

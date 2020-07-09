@@ -49,20 +49,25 @@ public class DefaultDisplay implements DisplayListener {
 
     public static final int CHANGE_ALL = CHANGE_SIZE | CHANGE_ROTATION | CHANGE_FRAME_DELAY;
 
-    private final Context mContext;
+    private final Context mDisplayContext;
     private final int mId;
     private final ArrayList<DisplayInfoChangeListener> mListeners = new ArrayList<>();
     private final Handler mChangeHandler;
     private Info mInfo;
 
     private DefaultDisplay(Context context) {
-        mContext = context;
-        mInfo = new Info(context);
+        DisplayManager dm = context.getSystemService(DisplayManager.class);
+        // Use application context to create display context so that it can have its own Resources.
+        mDisplayContext = context.getApplicationContext().createDisplayContext(
+                dm.getDisplay(DEFAULT_DISPLAY));
+        // Note that the Display object must be obtained from DisplayManager which is associated to
+        // the display context, so the Display is isolated from Activity and Application to provide
+        // the actual state of device that excludes the additional adjustment and override.
+        mInfo = new Info(mDisplayContext);
         mId = mInfo.id;
         mChangeHandler = new Handler(this::onChange);
 
-        context.getSystemService(DisplayManager.class)
-                .registerDisplayListener(this, UI_HELPER_EXECUTOR.getHandler());
+        dm.registerDisplayListener(this, UI_HELPER_EXECUTOR.getHandler());
     }
 
     @Override
@@ -78,7 +83,7 @@ public class DefaultDisplay implements DisplayListener {
         }
 
         Info oldInfo = mInfo;
-        Info info = new Info(mContext);
+        Info info = new Info(mDisplayContext);
 
         int change = 0;
         if (info.hasDifferentSize(oldInfo)) {
@@ -145,10 +150,11 @@ public class DefaultDisplay implements DisplayListener {
         }
 
         private Info(Context context) {
-            this(context.getSystemService(DisplayManager.class).getDisplay(DEFAULT_DISPLAY));
+            this(context, context.getSystemService(DisplayManager.class)
+                    .getDisplay(DEFAULT_DISPLAY));
         }
 
-        public Info(Display display) {
+        public Info(Context context, Display display) {
             id = display.getDisplayId();
             rotation = display.getRotation();
 
@@ -161,8 +167,7 @@ public class DefaultDisplay implements DisplayListener {
             display.getRealSize(realSize);
             display.getCurrentSizeRange(smallestSize, largestSize);
 
-            metrics = new DisplayMetrics();
-            display.getMetrics(metrics);
+            metrics = context.getResources().getDisplayMetrics();
         }
 
         private boolean hasDifferentSize(Info info) {

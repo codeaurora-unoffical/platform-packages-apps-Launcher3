@@ -15,16 +15,11 @@
  */
 package com.android.launcher3.hybridhotseat;
 
-import android.app.Notification;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
-import android.app.PendingIntent;
-import android.content.Intent;
-import android.content.res.Configuration;
-import android.os.Build;
-import android.view.View;
+import static com.android.launcher3.logging.StatsLogManager.LauncherEvent
+        .LAUNCHER_HOTSEAT_EDU_ONLY_TIP;
 
-import androidx.core.app.NotificationCompat;
+import android.content.Intent;
+import android.view.View;
 
 import com.android.launcher3.CellLayout;
 import com.android.launcher3.Hotseat;
@@ -37,11 +32,8 @@ import com.android.launcher3.config.FeatureFlags;
 import com.android.launcher3.model.data.FolderInfo;
 import com.android.launcher3.model.data.ItemInfo;
 import com.android.launcher3.model.data.WorkspaceItemInfo;
-import com.android.launcher3.uioverrides.QuickstepLauncher;
-import com.android.launcher3.util.ActivityTracker;
 import com.android.launcher3.util.GridOccupancy;
 import com.android.launcher3.util.IntArray;
-import com.android.launcher3.util.Themes;
 import com.android.launcher3.views.ArrowTipView;
 import com.android.launcher3.views.Snackbar;
 
@@ -54,18 +46,15 @@ import java.util.stream.IntStream;
  * Controller class for managing user onboaridng flow for hybrid hotseat
  */
 public class HotseatEduController {
-    public static final String KEY_HOTSEAT_EDU_SEEN = "hotseat_edu_seen";
 
-    private static final String NOTIFICATION_CHANNEL_ID = "launcher_onboarding";
-    private static final int ONBOARDING_NOTIFICATION_ID = 7641;
-
-    private static final String SETTINGS_ACTION =
+    public static final String HOTSEAT_EDU_ACTION =
+            "com.android.launcher3.action.SHOW_HYBRID_HOTSEAT_EDU";
+    public static final String SETTINGS_ACTION =
             "android.settings.ACTION_CONTENT_SUGGESTIONS_SETTINGS";
 
     private final Launcher mLauncher;
     private final Hotseat mHotseat;
-    private final NotificationManager mNotificationManager;
-    private final Notification mNotification;
+    private HotseatRestoreHelper mRestoreHelper;
     private List<WorkspaceItemInfo> mPredictedApps;
     private HotseatEduDialog mActiveDialog;
 
@@ -73,24 +62,28 @@ public class HotseatEduController {
     private IntArray mNewScreens = null;
     private Runnable mOnOnboardingComplete;
 
-    HotseatEduController(Launcher launcher, Runnable runnable) {
+    HotseatEduController(Launcher launcher, HotseatRestoreHelper restoreHelper, Runnable runnable) {
         mLauncher = launcher;
         mHotseat = launcher.getHotseat();
+        mRestoreHelper = restoreHelper;
         mOnOnboardingComplete = runnable;
-        mNotificationManager = mLauncher.getSystemService(NotificationManager.class);
-        createNotificationChannel();
-        mNotification = createNotification();
     }
 
     /**
      * Checks what type of migration should be used and migrates hotseat
      */
     void migrate() {
+        if (mRestoreHelper != null) {
+            mRestoreHelper.createBackup();
+        }
         if (FeatureFlags.HOTSEAT_MIGRATE_TO_FOLDER.get()) {
             migrateToFolder();
         } else {
             migrateHotseatWhole();
         }
+        Snackbar.show(mLauncher, R.string.hotsaet_tip_prediction_enabled,
+                R.string.hotseat_prediction_settings, null,
+                () -> mLauncher.startActivity(getSettingsIntent()));
     }
 
     /**
@@ -101,7 +94,6 @@ public class HotseatEduController {
      */
     private int migrateToFolder() {
         ArrayDeque<FolderInfo> folders = new ArrayDeque<>();
-
         ArrayList<WorkspaceItemInfo> putIntoFolder = new ArrayList<>();
 
         //separate folders and items that can get in folders
@@ -121,9 +113,9 @@ public class HotseatEduController {
         if (!putIntoFolder.isEmpty()) {
             ItemInfo firstItem = putIntoFolder.get(0);
             FolderInfo folderInfo = new FolderInfo();
-            folderInfo.setTitle("");
             mLauncher.getModelWriter().addItemToDatabase(folderInfo, firstItem.container,
                     firstItem.screenId, firstItem.cellX, firstItem.cellY);
+            folderInfo.setTitle("", mLauncher.getModelWriter());
             folderInfo.contents.addAll(putIntoFolder);
             for (int i = 0; i < folderInfo.contents.size(); i++) {
                 ItemInfo item = folderInfo.contents.get(i);
@@ -216,11 +208,6 @@ public class HotseatEduController {
         return pageId;
     }
 
-
-    void removeNotification() {
-        mNotificationManager.cancel(ONBOARDING_NOTIFICATION_ID);
-    }
-
     void moveHotseatItems() {
         mHotseat.removeAllViewsInLayout();
         if (!mNewItems.isEmpty()) {
@@ -241,15 +228,14 @@ public class HotseatEduController {
 
     void finishOnboarding() {
         mOnOnboardingComplete.run();
-        destroy();
-        mLauncher.getSharedPrefs().edit().putBoolean(KEY_HOTSEAT_EDU_SEEN, true).apply();
     }
 
     void showDimissTip() {
         if (mHotseat.getShortcutsAndWidgets().getChildCount()
                 < mLauncher.getDeviceProfile().inv.numHotseatIcons) {
-            Snackbar.show(mLauncher, R.string.hotseat_tip_gaps_filled, R.string.hotseat_turn_off,
-                    null, () -> mLauncher.startActivity(new Intent(SETTINGS_ACTION)));
+            Snackbar.show(mLauncher, R.string.hotseat_tip_gaps_filled,
+                    R.string.hotseat_prediction_settings, null,
+                    () -> mLauncher.startActivity(getSettingsIntent()));
         } else {
             new ArrowTipView(mLauncher).show(
                     mLauncher.getString(R.string.hotseat_tip_no_empty_slots), mHotseat.getTop());
@@ -258,48 +244,6 @@ public class HotseatEduController {
 
     void setPredictedApps(List<WorkspaceItemInfo> predictedApps) {
         mPredictedApps = predictedApps;
-        if (!mPredictedApps.isEmpty()
-                && mLauncher.getOrientation() == Configuration.ORIENTATION_PORTRAIT) {
-            mNotificationManager.notify(ONBOARDING_NOTIFICATION_ID, mNotification);
-        }
-        else {
-            removeNotification();
-        }
-    }
-
-    private void createNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
-        CharSequence name = mLauncher.getString(R.string.hotseat_edu_prompt_title);
-        int importance = NotificationManager.IMPORTANCE_LOW;
-        NotificationChannel channel = new NotificationChannel(NOTIFICATION_CHANNEL_ID, name,
-                importance);
-        mNotificationManager.createNotificationChannel(channel);
-    }
-
-    private Notification createNotification() {
-        Intent intent = new Intent(mLauncher.getApplicationContext(), mLauncher.getClass());
-        intent = new NotificationHandler().addToIntent(intent);
-
-        CharSequence name = mLauncher.getString(R.string.hotseat_edu_prompt_title);
-        String description = mLauncher.getString(R.string.hotseat_edu_prompt_content);
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(mLauncher,
-                NOTIFICATION_CHANNEL_ID)
-                .setContentTitle(name)
-                .setOngoing(true)
-                .setColor(Themes.getColorAccent(mLauncher))
-                .setContentIntent(PendingIntent.getActivity(mLauncher, 0, intent,
-                        PendingIntent.FLAG_CANCEL_CURRENT))
-                .setSmallIcon(R.drawable.hotseat_edu_notification_icon)
-                .setContentText(description);
-        return builder.build();
-
-    }
-
-    void destroy() {
-        removeNotification();
-        if (mActiveDialog != null) {
-            mActiveDialog.setHotseatEduController(null);
-        }
     }
 
     void showEdu() {
@@ -319,6 +263,7 @@ public class HotseatEduController {
                     requiresMigration ? R.string.hotseat_tip_no_empty_slots
                             : R.string.hotseat_auto_enrolled),
                     mHotseat.getTop());
+            mLauncher.getStatsLogManager().logger().log(LAUNCHER_HOTSEAT_EDU_ONLY_TIP);
             finishOnboarding();
         }
     }
@@ -335,13 +280,8 @@ public class HotseatEduController {
         mActiveDialog.show(mPredictedApps);
     }
 
-    static class NotificationHandler implements
-            ActivityTracker.SchedulerCallback<QuickstepLauncher> {
-        @Override
-        public boolean init(QuickstepLauncher activity, boolean alreadyOnHome) {
-            activity.getHotseatPredictionController().showEdu();
-            return true;
-        }
+    static Intent getSettingsIntent() {
+        return new Intent(SETTINGS_ACTION).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
     }
 }
 

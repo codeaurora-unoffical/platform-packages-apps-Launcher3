@@ -18,6 +18,7 @@ package com.android.quickstep.interaction;
 import static com.android.quickstep.interaction.TutorialController.TutorialType.BACK_NAVIGATION_COMPLETE;
 import static com.android.quickstep.interaction.TutorialController.TutorialType.LEFT_EDGE_BACK_NAVIGATION;
 
+import android.graphics.PointF;
 import android.view.View;
 
 import com.android.launcher3.R;
@@ -29,14 +30,6 @@ final class BackGestureTutorialController extends TutorialController {
 
     BackGestureTutorialController(BackGestureTutorialFragment fragment, TutorialType tutorialType) {
         super(fragment, tutorialType);
-    }
-
-    @Override
-    void transitToController() {
-        super.transitToController();
-        if (mTutorialType != BACK_NAVIGATION_COMPLETE) {
-            showHandCoachingAnimation();
-        }
     }
 
     @Override
@@ -154,7 +147,7 @@ final class BackGestureTutorialController extends TutorialController {
     }
 
     @Override
-    public void onNavBarGestureAttempted(NavBarGestureResult result) {
+    public void onNavBarGestureAttempted(NavBarGestureResult result, PointF finalVelocity) {
         if (mTutorialType == BACK_NAVIGATION_COMPLETE) {
             if (result == NavBarGestureResult.HOME_GESTURE_COMPLETED) {
                 mTutorialFragment.closeTutorial();

@@ -1,5 +1,7 @@
 package com.android.launcher3.popup;
 
+import static com.android.launcher3.logging.StatsLogManager.LauncherEvent.LAUNCHER_SYSTEM_SHORTCUT_APP_INFO_TAP;
+import static com.android.launcher3.logging.StatsLogManager.LauncherEvent.LAUNCHER_SYSTEM_SHORTCUT_WIDGETS_TAP;
 
 import android.app.ActivityOptions;
 import android.content.Context;
@@ -27,6 +29,7 @@ import com.android.launcher3.util.PackageUserKey;
 import com.android.launcher3.widget.WidgetsBottomSheet;
 
 import java.util.List;
+
 /**
  * Represents a system shortcut for a given app. The shortcut should have a label and icon, and an
  * onClickListener that depends on the item that the shortcut services.
@@ -103,7 +106,6 @@ public abstract class SystemShortcut<T extends BaseDraggingActivity> extends Ite
     };
 
     public static class Widgets extends SystemShortcut<Launcher> {
-
         public Widgets(Launcher target, ItemInfo itemInfo) {
             super(R.drawable.ic_widget, R.string.widget_button_text, target, itemInfo);
         }
@@ -117,6 +119,8 @@ public abstract class SystemShortcut<T extends BaseDraggingActivity> extends Ite
             widgetsBottomSheet.populateAndShow(mItemInfo);
             mTarget.getUserEventDispatcher().logActionOnControl(Action.Touch.TAP,
                     ControlType.WIDGETS_BUTTON, view);
+            mTarget.getStatsLogManager().logger().withItemInfo(mItemInfo)
+                    .log(LAUNCHER_SYSTEM_SHORTCUT_WIDGETS_TAP);
         }
     }
 
@@ -137,6 +141,8 @@ public abstract class SystemShortcut<T extends BaseDraggingActivity> extends Ite
                     mItemInfo, sourceBounds, ActivityOptions.makeBasic().toBundle());
             mTarget.getUserEventDispatcher().logActionOnControl(Action.Touch.TAP,
                     ControlType.APPINFO_TARGET, view);
+            mTarget.getStatsLogManager().logger().withItemInfo(mItemInfo)
+                    .log(LAUNCHER_SYSTEM_SHORTCUT_APP_INFO_TAP);
         }
     }
 

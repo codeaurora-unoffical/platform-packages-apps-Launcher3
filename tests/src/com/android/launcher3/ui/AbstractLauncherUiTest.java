@@ -294,22 +294,15 @@ public abstract class AbstractLauncherUiTest {
         // Limits UI tests affecting tests running after them.
         mLauncher.waitForLauncherInitialized();
         if (mLauncherPid != 0) {
-            assertEquals("Launcher crashed, pid mismatch:", mLauncherPid, mLauncher.getPid());
+            assertEquals("Launcher crashed, pid mismatch:",
+                    mLauncherPid, mLauncher.getPid().intValue());
         }
         checkDetectedLeaks(mLauncher);
     }
 
-    protected void clearLauncherData() throws IOException, InterruptedException {
-        if (TestHelpers.isInLauncherProcess()) {
-            LauncherSettings.Settings.call(mTargetContext.getContentResolver(),
-                    LauncherSettings.Settings.METHOD_CREATE_EMPTY_DB);
-            resetLoaderState();
-        } else {
-            clearPackageData(mDevice.getLauncherPackageName());
-            mLauncher.enableDebugTracing();
-            mLauncherPid = mLauncher.getPid();
-            mLauncher.waitForLauncherInitialized();
-        }
+    protected void clearLauncherData() {
+        mLauncher.clearLauncherData();
+        mLauncher.waitForLauncherInitialized();
     }
 
     /**

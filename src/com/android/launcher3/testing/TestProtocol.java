@@ -88,6 +88,10 @@ public final class TestProtocol {
     public static final String REQUEST_NATIVE_LEAK = "native-leak";
     public static final String REQUEST_VIEW_LEAK = "view-leak";
     public static final String REQUEST_RECENT_TASKS_LIST = "recent-tasks-list";
+    public static final String REQUEST_START_EVENT_LOGGING = "start-event-logging";
+    public static final String REQUEST_GET_TEST_EVENTS = "get-test-events";
+    public static final String REQUEST_STOP_EVENT_LOGGING = "stop-event-logging";
+    public static final String REQUEST_CLEAR_DATA = "clear-data";
 
     public static boolean sDebugTracing = false;
     public static final String REQUEST_ENABLE_DEBUG_TRACING = "enable-debug-tracing";
@@ -101,4 +105,5 @@ public final class TestProtocol {
     public static final String PERMANENT_DIAG_TAG = "TaplTarget";
     public static final String PAUSE_NOT_DETECTED = "b/139891609";
     public static final String OVERIEW_NOT_ALLAPPS = "b/156095088";
+    public static final String NO_SWIPE_TO_HOME = "b/158017601";
 }

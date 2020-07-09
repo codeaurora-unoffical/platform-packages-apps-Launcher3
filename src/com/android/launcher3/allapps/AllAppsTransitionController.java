@@ -6,13 +6,14 @@ import static com.android.launcher3.LauncherState.APPS_VIEW_ITEM_MASK;
 import static com.android.launcher3.LauncherState.OVERVIEW;
 import static com.android.launcher3.LauncherState.VERTICAL_SWIPE_INDICATOR;
 import static com.android.launcher3.anim.Interpolators.FAST_OUT_SLOW_IN;
+import static com.android.launcher3.anim.Interpolators.FINAL_FRAME;
+import static com.android.launcher3.anim.Interpolators.INSTANT;
 import static com.android.launcher3.anim.Interpolators.LINEAR;
 import static com.android.launcher3.anim.PropertySetter.NO_ANIM_PROPERTY_SETTER;
 import static com.android.launcher3.states.StateAnimationConfig.ANIM_ALL_APPS_FADE;
 import static com.android.launcher3.states.StateAnimationConfig.ANIM_ALL_APPS_HEADER_FADE;
 import static com.android.launcher3.states.StateAnimationConfig.ANIM_OVERVIEW_SCALE;
 import static com.android.launcher3.states.StateAnimationConfig.ANIM_VERTICAL_PROGRESS;
-import static com.android.launcher3.util.SystemUiController.UI_STATE_ALL_APPS;
 
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
@@ -35,7 +36,6 @@ import com.android.launcher3.anim.PropertySetter;
 import com.android.launcher3.statemanager.StateManager.StateHandler;
 import com.android.launcher3.states.StateAnimationConfig;
 import com.android.launcher3.uioverrides.plugins.PluginManagerWrapper;
-import com.android.launcher3.util.Themes;
 import com.android.launcher3.views.ScrimView;
 import com.android.systemui.plugins.AllAppsSearchPlugin;
 import com.android.systemui.plugins.PluginListener;
@@ -73,7 +73,6 @@ public class AllAppsTransitionController implements StateHandler<LauncherState>,
     private ScrimView mScrimView;
 
     private final Launcher mLauncher;
-    private final boolean mIsDarkTheme;
     private boolean mIsVerticalLayout;
 
     // Animation in this class is controlled by a single variable {@link mProgress}.
@@ -96,7 +95,6 @@ public class AllAppsTransitionController implements StateHandler<LauncherState>,
         mShiftRange = mLauncher.getDeviceProfile().heightPx;
         mProgress = 1f;
 
-        mIsDarkTheme = Themes.getAttrBoolean(mLauncher, R.attr.isMainColorDark);
         mIsVerticalLayout = mLauncher.getDeviceProfile().isVerticalBarLayout();
         mLauncher.addOnDeviceProfileChangeListener(this);
     }
@@ -135,16 +133,6 @@ public class AllAppsTransitionController implements StateHandler<LauncherState>,
         if (mPlugin != null) {
             mPlugin.setProgress(progress);
         }
-
-        // Use a light system UI (dark icons) if all apps is behind at least half of the
-        // status bar.
-        boolean forceChange = Math.min(shiftCurrent, mScrimView.getVisualTop())
-                <= mLauncher.getDeviceProfile().getInsets().top / 2f;
-        if (forceChange) {
-            mLauncher.getSystemUiController().updateUiState(UI_STATE_ALL_APPS, !mIsDarkTheme);
-        } else {
-            mLauncher.getSystemUiController().updateUiState(UI_STATE_ALL_APPS, 0);
-        }
     }
 
     public float getProgress() {
@@ -171,7 +159,9 @@ public class AllAppsTransitionController implements StateHandler<LauncherState>,
             StateAnimationConfig config, PendingAnimation builder) {
         float targetProgress = toState.getVerticalProgress(mLauncher);
         if (Float.compare(mProgress, targetProgress) == 0) {
-            setAlphas(toState, config, builder);
+            if (!config.onlyPlayAtomicComponent()) {
+                setAlphas(toState, config, builder);
+            }
             // Fail fast
             onProgressAnimationEnd();
             return;
@@ -187,7 +177,6 @@ public class AllAppsTransitionController implements StateHandler<LauncherState>,
                 : FAST_OUT_SLOW_IN;
 
         Animator anim = createSpringAnimation(mProgress, targetProgress);
-        anim.setDuration(config.duration);
         anim.setInterpolator(config.getInterpolator(ANIM_VERTICAL_PROGRESS, interpolator));
         anim.addListener(getProgressAnimatorListener());
         builder.add(anim);
@@ -227,7 +216,9 @@ public class AllAppsTransitionController implements StateHandler<LauncherState>,
         setter.setInt(mScrimView, ScrimView.DRAG_HANDLE_ALPHA,
                 (visibleElements & VERTICAL_SWIPE_INDICATOR) != 0 ? 255 : 0, allAppsFade);
 
-        setter.setViewAlpha(mAppsView, hasAnyVisibleItem ? 1 : 0, allAppsFade);
+        // Set visibility of the container at the very beginning or end of the transition.
+        setter.setViewAlpha(mAppsView, hasAnyVisibleItem ? 1 : 0,
+                hasAnyVisibleItem ? INSTANT : FINAL_FRAME);
     }
 
     public AnimatorListenerAdapter getProgressAnimatorListener() {
